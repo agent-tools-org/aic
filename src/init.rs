@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const CONFIG_COMMENT: &str = "# aic audit config — see https://...\n\n";
+const CONFIG_COMMENT: &str = "# aic audit config — see docs/architecture.md §6\n\n";
 const NO_UNWRAP_RULE: &str = concat!(
     "---\n",
     "id: no-unwrap-in-prod\n",

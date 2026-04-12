@@ -27,6 +27,27 @@ impl<'cfg> Pipeline<'cfg> {
             .with_context(|| format!("read diff {}", request.diff_path.display()))?;
         let mut layer_results = Vec::new();
         let mut evidence = Vec::new();
+
+        // Empty-diff early exit: nothing to audit. Skip all LLM layers and return Pass.
+        // Triggered when aid --audit wraps a pure text/research task with no code change.
+        if diff_text.trim().is_empty() {
+            let budget = request.budget_usd.or(Some(self.config.integration.budget_usd_per_audit));
+            layer_results.push(LayerResult {
+                layer: Layer::L0Static,
+                verdict: crate::types::Verdict::Pass,
+                duration_ms: 0,
+                evidence_count: 1,
+            });
+            evidence.push(Evidence {
+                layer: Layer::L0Static,
+                signal: crate::types::SignalKind::Script,
+                passed: true,
+                detail: "empty diff — no code to audit, skipping LLM layers".into(),
+                cite: Some("aic:empty-diff".into()),
+                cost_usd: 0.0,
+            });
+            return Ok(self.finalize(layer_results, evidence, start, budget));
+        }
         let budget = request.budget_usd.or(Some(self.config.integration.budget_usd_per_audit));
         let aid_dispatcher = RealAidDispatcher;
 
@@ -191,6 +212,40 @@ mod tests {
         let result = Pipeline::new(&config, dir.path().to_path_buf()).execute(request)?;
 
         assert!(matches!(result.verdict, Verdict::Pass));
+        Ok(())
+    }
+
+    #[test]
+    fn execute_empty_diff_returns_pass_without_running_llm_layers() -> Result<()> {
+        let dir = tempdir()?;
+        let diff = dir.path().join("diff.patch");
+        fs::write(&diff, "")?;
+        let config = Config {
+            layers: Layers {
+                l0: L0 { commands: vec!["exit 1".to_owned()], secret_scan: false, address_verify: false },
+                l1: L1 { commands: vec!["exit 1".to_owned()], max_duration_secs: 5 },
+                l2: L2 { enabled: true, ..L2::default() },
+                l3: L3 { enabled: true, ..L3::default() },
+                ..Layers::default()
+            },
+            integration: Integration::default(),
+        };
+        let request = AuditRequest {
+            task_id: Some("empty".to_owned()),
+            diff_path: diff,
+            artifacts: Vec::new(),
+            context: Default::default(),
+            skip_layers: Vec::new(),
+            budget_usd: None,
+        };
+
+        let result = Pipeline::new(&config, dir.path().to_path_buf()).execute(request)?;
+
+        assert!(matches!(result.verdict, Verdict::Pass));
+        assert_eq!(result.layer_results.len(), 1);
+        assert_eq!(result.layer_results[0].layer, Layer::L0Static);
+        assert_eq!(result.evidence.len(), 1);
+        assert!(result.evidence[0].detail.contains("empty diff"));
         Ok(())
     }
 

@@ -1,4 +1,4 @@
-# aic audit config — see https://...
+# aic audit config — see docs/architecture.md §6
 
 [layers.l0]
 commands = [
@@ -19,13 +19,9 @@ rules_dir = ".aic/rules"
 
 [layers.l3]
 enabled = true
-models = [
-    "gemini",
-    "codex",
-    "claude-haiku",
-]
+models = ["codex"]
 swap = true
-consensus_threshold = 2
+consensus_threshold = 1
 
 [layers.l4]
 scripts = [".aic/checks/*.sh"]
@@ -33,4 +29,4 @@ scripts = [".aic/checks/*.sh"]
 [integration]
 aid_auto_audit = false
 aib_auto_block = true
-budget_usd_per_audit = 2.0
+budget_usd_per_audit = 5.0
