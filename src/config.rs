@@ -63,6 +63,7 @@ impl Default for L2 {
 #[serde(default)]
 pub struct L3 {
     #[serde(default = "default_true")] pub enabled: bool,
+    /// v0.1 dogfood found small-model judges (flash-lite, haiku) do not reliably follow strict-JSON output schemas. Default to the capable model only; users who want multi-model consensus can add them back and raise the threshold.
     #[serde(default = "l3_models")] pub models: Vec<String>,
     #[serde(default = "default_true")] pub swap: bool,
     #[serde(default = "consensus_threshold")] pub consensus_threshold: u8,
@@ -85,10 +86,11 @@ impl Default for L4 {
 pub struct Integration {
     #[serde(default)] pub aid_auto_audit: bool,
     #[serde(default = "default_true")] pub aib_auto_block: bool,
+    /// Default raised in v0.2 after dogfood run found real L3 runs cost $1.00-$2.50 per audit.
     #[serde(default = "budget_usd_per_audit")] pub budget_usd_per_audit: f64,
 }
 impl Default for Integration {
-    fn default() -> Self { Self { aid_auto_audit: false, aib_auto_block: true, budget_usd_per_audit: 2.0 } }
+    fn default() -> Self { Self { aid_auto_audit: false, aib_auto_block: true, budget_usd_per_audit: budget_usd_per_audit() } }
 }
 fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_owned()).collect()
@@ -99,7 +101,7 @@ fn l1_commands() -> Vec<String> { strings(&["cargo test --lib"]) }
 fn l1_max_duration_secs() -> u64 { 120 }
 fn l2_model() -> String { "gemini-flash".to_owned() }
 fn rules_dir() -> String { ".aic/rules".to_owned() }
-fn l3_models() -> Vec<String> { strings(&["gemini", "codex", "claude-haiku"]) }
-fn consensus_threshold() -> u8 { 2 }
+fn l3_models() -> Vec<String> { strings(&["codex"]) }
+fn consensus_threshold() -> u8 { 1 }
 fn l4_scripts() -> Vec<String> { strings(&[".aic/checks/*.sh"]) }
-fn budget_usd_per_audit() -> f64 { 2.0 }
+fn budget_usd_per_audit() -> f64 { 5.0 }

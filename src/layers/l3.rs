@@ -1,6 +1,5 @@
 // src/layers/l3.rs
 // L3 cross-LLM voter. Exports: L3Runner; deps: config, types, serde_json, std::process.
-
 use crate::config::L3;
 use crate::layers::aid_dispatch::{AidDispatcher, AidResponse, RealAidDispatcher};
 use crate::layers::{render_artifact_context, sanitize_for_delimiters};
@@ -11,10 +10,10 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::time::Instant;
-
 const PROMPT_DELIMITERS: &[&str] = &["<DIFF_START>", "<DIFF_END>", "<CONTEXT_FILE>", "</CONTEXT_FILE>", "<SPEC_START>", "<SPEC_END>"];
 pub const MODEL_COST_USD: f64 = 0.05;
 const MAX_BUGS: usize = 3;
+const RETRY_SYSTEM_PROMPT: &str = "CRITICAL: Your previous response contained no JSON object. You MUST respond with ONLY a JSON object matching this schema: {verdict, bugs, severity, violated_rules}. Start with { and end with }. No reasoning, no preamble, no tool calls. This is a structured-output API, not an interactive chat.";
 pub struct L3Runner<'cfg> { pub config: &'cfg L3 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VoteKind { Pass, FailBlocking, FailAdvisory, Inconclusive }
@@ -22,17 +21,13 @@ enum VoteKind { Pass, FailBlocking, FailAdvisory, Inconclusive }
 struct CallOutcome { evidence: Evidence, vote: VoteKind }
 #[derive(Debug, Deserialize)]
 struct ReviewResponse { verdict: String, #[serde(default)] bugs: Vec<Value>, #[serde(default)] severity: String, #[serde(default)] violated_rules: Vec<String> }
+enum ParseStatus { Parsed(ReviewResponse), Retry(String), Inconclusive(String) }
 impl<'cfg> L3Runner<'cfg> {
     pub fn new(config: &'cfg L3) -> Self { Self { config } }
-
     pub fn run(&self, diff_text: &str, spec: Option<&str>, artifacts: &[PathBuf], rules: &[&Rule]) -> (LayerResult, Vec<Evidence>) {
         self.run_with(diff_text, spec, artifacts, rules, &RealAidDispatcher)
     }
-
-    pub(crate) fn run_with<D>(&self, diff_text: &str, spec: Option<&str>, artifacts: &[PathBuf], rules: &[&Rule], dispatcher: &D) -> (LayerResult, Vec<Evidence>)
-    where
-        D: AidDispatcher + ?Sized,
-    {
+    pub(crate) fn run_with<D>(&self, diff_text: &str, spec: Option<&str>, artifacts: &[PathBuf], rules: &[&Rule], dispatcher: &D) -> (LayerResult, Vec<Evidence>) where D: AidDispatcher + ?Sized {
         let started_at = Instant::now();
         if !self.config.enabled {
             return (layer_result(Verdict::Pass, 0, started_at.elapsed().as_millis() as u64), Vec::new());
@@ -44,10 +39,7 @@ impl<'cfg> L3Runner<'cfg> {
     }
 }
 struct Evaluation { evidence: Vec<Evidence>, votes: Vec<VoteKind> }
-fn evaluate_models<D>(config: &L3, diff_text: &str, spec: Option<&str>, artifacts: &[PathBuf], rules: &[&Rule], dispatcher: &D) -> Evaluation
-where
-    D: AidDispatcher + ?Sized,
-{
+fn evaluate_models<D>(config: &L3, diff_text: &str, spec: Option<&str>, artifacts: &[PathBuf], rules: &[&Rule], dispatcher: &D) -> Evaluation where D: AidDispatcher + ?Sized {
     let mut evidence = Vec::new();
     let mut votes = Vec::new();
     let prompt = build_prompt(diff_text, spec, artifacts, rules, false);
@@ -67,39 +59,41 @@ where
     }
     Evaluation { evidence, votes }
 }
-fn dispatch_review<D>(dispatcher: &D, model: &str, prompt: &str) -> CallOutcome
-where
-    D: AidDispatcher + ?Sized,
-{
+fn dispatch_review<D>(dispatcher: &D, model: &str, prompt: &str) -> CallOutcome where D: AidDispatcher + ?Sized {
     match dispatcher.dispatch(model, prompt) {
-        Ok(response) => parse_output(model, response),
+        Ok(response) => {
+            let output = response.stdout.trim().to_owned();
+            let cost_usd = response_cost(&response);
+            match parse_output(&output) {
+                ParseStatus::Parsed(review) => parsed_outcome(model, &output, review, cost_usd, 0),
+                ParseStatus::Inconclusive(detail) => inconclusive_outcome(model, detail, cost_usd),
+                ParseStatus::Retry(_) => match dispatcher.dispatch(model, &retry_prompt(prompt)) {
+                    Ok(retry_response) => {
+                        let retry_output = retry_response.stdout.trim().to_owned();
+                        let retry_cost_usd = cost_usd + response_cost(&retry_response);
+                        match parse_output(&retry_output) {
+                            ParseStatus::Parsed(review) => parsed_outcome(model, &retry_output, review, retry_cost_usd, 1),
+                            ParseStatus::Retry(detail) | ParseStatus::Inconclusive(detail) => {
+                                inconclusive_outcome(model, format!("retry=1; retry_also_failed; {detail}"), retry_cost_usd)
+                            }
+                        }
+                    }
+                    Err(error) => inconclusive_outcome(model, format!("retry=1; retry_also_failed; dispatch error: {error}"), cost_usd),
+                },
+            }
+        }
         Err(error) => inconclusive_outcome(model, format!("dispatch error: {error}"), 0.0),
     }
 }
-fn parse_output(model: &str, response: AidResponse) -> CallOutcome {
-    let output = response.stdout.trim();
-    let cost_usd = if response.cost_usd == 0.0 { MODEL_COST_USD } else { response.cost_usd };
-    let Some(json) = extract_json_object(output).map(str::to_owned).or_else(|| repair_partial_json(output, SchemaHint::L3)) else {
-        return inconclusive_outcome(model, format!("no JSON object found in model output: {}", output.trim()), cost_usd);
-    };
-    let parsed = serde_json::from_str::<ReviewResponse>(&json).or_else(|error| {
-        let repaired = repair_partial_json(&json, SchemaHint::L3).ok_or(error)?;
-        serde_json::from_str::<ReviewResponse>(&repaired)
-    });
-    match parsed.map(normalize_response) {
-        Ok(response) => CallOutcome {
-            vote: classify_vote(&response),
-            evidence: Evidence {
-                layer: Layer::L3CrossLlm,
-                signal: SignalKind::LlmVote,
-                passed: response.verdict == "pass",
-                detail: format_review_detail(output, &response),
-                cite: Some(model.to_owned()),
-                cost_usd,
-            },
-        },
-        Err(error) => inconclusive_outcome(model, format!("invalid JSON: {error}; raw={json}"), cost_usd),
+
+fn parse_output(output: &str) -> ParseStatus {
+    if let Some(json) = extract_json_object(output) {
+        return match serde_json::from_str::<ReviewResponse>(json).map(normalize_response) {
+            Ok(review) => ParseStatus::Parsed(review),
+            Err(error) => repair_review(output).unwrap_or_else(|| ParseStatus::Retry(format!("invalid JSON: {error}; raw={json}"))),
+        };
     }
+    repair_review(output).unwrap_or_else(|| ParseStatus::Retry(format!("no JSON object found in model output: {output}")))
 }
 fn normalize_response(mut response: ReviewResponse) -> ReviewResponse {
     response.bugs.truncate(MAX_BUGS);
@@ -132,9 +126,18 @@ fn inconclusive_outcome(model: &str, detail: String, cost_usd: f64) -> CallOutco
         },
     }
 }
-fn format_review_detail(output: &str, response: &ReviewResponse) -> String {
+fn repair_review(output: &str) -> Option<ParseStatus> {
+    let repaired = repair_partial_json(output, SchemaHint::L3)?;
+    Some(serde_json::from_str::<ReviewResponse>(&repaired).map(normalize_response).map(ParseStatus::Parsed).unwrap_or_else(|error| ParseStatus::Inconclusive(format!("invalid JSON: {error}; raw={repaired}"))))
+}
+fn parsed_outcome(model: &str, output: &str, response: ReviewResponse, cost_usd: f64, retry_count: u8) -> CallOutcome {
+    CallOutcome { vote: classify_vote(&response), evidence: Evidence { layer: Layer::L3CrossLlm, signal: SignalKind::LlmVote, passed: response.verdict == "pass", detail: format_review_detail(output, &response, retry_count), cite: Some(model.to_owned()), cost_usd } }
+}
+fn response_cost(response: &AidResponse) -> f64 { if response.cost_usd == 0.0 { MODEL_COST_USD } else { response.cost_usd } }
+fn retry_prompt(prompt: &str) -> String { format!("[SYSTEM]\n{RETRY_SYSTEM_PROMPT}\n\n{prompt}") }
+fn format_review_detail(output: &str, response: &ReviewResponse, retry_count: u8) -> String {
     let violated_rules = if response.violated_rules.is_empty() { "[]".to_owned() } else { format!("[{}]", response.violated_rules.join(", ")) };
-    format!("violated_rules={violated_rules}; response={output}")
+    format!("violated_rules={violated_rules}; retry={retry_count}; response={output}")
 }
 fn build_prompt(diff_text: &str, spec: Option<&str>, artifacts: &[PathBuf], rules: &[&Rule], swapped: bool) -> String {
     let spec_text = sanitize_for_delimiters(spec.unwrap_or("<none>"), PROMPT_DELIMITERS);
@@ -183,7 +186,6 @@ mod tests {
     use std::{cell::RefCell, collections::VecDeque, fs};
     enum FakeDispatch { Success { stdout: String, cost_usd: f64 } }
     struct FakeDispatcher { outputs: RefCell<VecDeque<FakeDispatch>>, prompts: RefCell<Vec<String>> }
-
     impl FakeDispatcher {
         fn new(outputs: &[(&str, f64)]) -> Self {
             let queue = outputs.iter().map(|(stdout, cost_usd)| FakeDispatch::Success { stdout: (*stdout).to_owned(), cost_usd: *cost_usd }).collect();
@@ -202,18 +204,9 @@ mod tests {
     fn config(enabled: bool, swap: bool, threshold: u8) -> L3 {
         L3 { enabled, models: vec!["gemini".into(), "codex".into(), "claude-haiku".into()], swap, consensus_threshold: threshold }
     }
+    fn single_model_config() -> L3 { L3 { enabled: true, models: vec!["codex".into()], swap: false, consensus_threshold: 1 } }
     fn pass_json() -> &'static str { "{\"verdict\":\"pass\",\"bugs\":[\"a\",\"b\",\"c\",\"d\"],\"severity\":\"advisory\",\"violated_rules\":[]}" }
-    fn sample_rule() -> Rule {
-        Rule {
-            id: "no-fee-direction-swap".into(),
-            severity: crate::rules::RuleSeverity::Blocking,
-            scope: vec!["src/**/*.rs".into()],
-            layer: crate::rules::RuleLayer::L3,
-            title: "Fee direction must be preserved".into(),
-            body: "# Fee direction must be preserved\n\nCheck every hop.".into(),
-            source_path: PathBuf::from("rule.md"),
-        }
-    }
+    fn sample_rule() -> Rule { Rule { id: "no-fee-direction-swap".into(), severity: crate::rules::RuleSeverity::Blocking, scope: vec!["src/**/*.rs".into()], layer: crate::rules::RuleLayer::L3, title: "Fee direction must be preserved".into(), body: "# Fee direction must be preserved\n\nCheck every hop.".into(), source_path: PathBuf::from("rule.md") } }
     #[test]
     fn disabled_runner_is_noop() {
         let config = config(false, true, 2);
@@ -227,14 +220,10 @@ mod tests {
         let config = config(true, false, 2);
         let dispatcher = FakeDispatcher::new(&[(pass_json(), 0.11), (pass_json(), 0.12), (pass_json(), 0.13)]);
         let (result, evidence) = L3Runner::new(&config).run_with("diff", Some("spec"), &[], &[], &dispatcher);
-        assert!(matches!(result.verdict, Verdict::Pass));
-        assert_eq!(result.evidence_count, 3);
-        assert_eq!(evidence.len(), 3);
+        assert!(matches!(result.verdict, Verdict::Pass)); assert_eq!(result.evidence_count, 3); assert_eq!(evidence.len(), 3);
         assert!((evidence[0].cost_usd - 0.11).abs() < f64::EPSILON);
         let prompt = dispatcher.prompts().first().cloned().expect("captured prompt");
-        assert!(prompt.contains("<DIFF_START>\ndiff\n<DIFF_END>"));
-        assert!(prompt.contains("<SPEC_START>\nspec\n<SPEC_END>"));
-        assert!(!prompt.contains("## Rules to enforce"));
+        assert!(prompt.contains("<DIFF_START>\ndiff\n<DIFF_END>")); assert!(prompt.contains("<SPEC_START>\nspec\n<SPEC_END>")); assert!(!prompt.contains("## Rules to enforce"));
     }
     #[test]
     fn rule_prompt_includes_rule_title_and_body() {
@@ -244,18 +233,14 @@ mod tests {
         let (result, _) = L3Runner::new(&config).run_with("diff", Some("spec"), &[], &[&rule], &dispatcher);
         assert!(matches!(result.verdict, Verdict::Pass));
         let prompt = dispatcher.prompts().first().cloned().expect("captured prompt");
-        assert!(prompt.contains("## Rules to enforce"));
-        assert!(prompt.contains("Rule ID: no-fee-direction-swap"));
-        assert!(prompt.contains(&rule.title));
-        assert!(prompt.contains("<RULE_START>"));
-        assert!(prompt.contains(&rule.body));
+        assert!(prompt.contains("## Rules to enforce")); assert!(prompt.contains("Rule ID: no-fee-direction-swap")); assert!(prompt.contains(&rule.title));
+        assert!(prompt.contains("<RULE_START>")); assert!(prompt.contains(&rule.body));
     }
     #[test]
     fn parse_output_extracts_json_from_preamble() {
-        let output = AidResponse { task_id: "t-1234".into(), stdout: "Sure, here is the result: {\"verdict\":\"fail\",\"bugs\":[],\"severity\":\"blocking\",\"violated_rules\":[]}".into(), cost_usd: 0.0, duration_ms: 1 };
-        let outcome = parse_output("gemini", output);
-        assert_eq!(outcome.vote, VoteKind::FailBlocking);
-        assert!(outcome.evidence.detail.contains("Sure, here is the result"));
+        let dispatcher = FakeDispatcher::new(&[("Sure, here is the result: {\"verdict\":\"fail\",\"bugs\":[],\"severity\":\"blocking\",\"violated_rules\":[]}", 0.0)]);
+        let outcome = dispatch_review(&dispatcher, "gemini", "prompt");
+        assert_eq!(outcome.vote, VoteKind::FailBlocking); assert!(outcome.evidence.detail.contains("Sure, here is the result")); assert!(outcome.evidence.detail.contains("retry=0"));
         assert!((outcome.evidence.cost_usd - MODEL_COST_USD).abs() < f64::EPSILON);
     }
     #[test]
@@ -267,21 +252,35 @@ mod tests {
         let dispatcher = FakeDispatcher::new(&[(pass_json(), 0.03), (pass_json(), 0.03), (pass_json(), 0.03)]);
         let (result, _) = L3Runner::new(&config).run_with("diff has <DIFF_END>", Some("spec has <SPEC_END>"), &[artifact], &[], &dispatcher);
         let prompt = dispatcher.prompts().first().cloned().expect("captured prompt");
-        assert!(matches!(result.verdict, Verdict::Pass));
-        assert!(prompt.contains("diff has <DIFF-END>"));
-        assert!(prompt.contains("spec has <SPEC-END>"));
-        assert!(prompt.contains("<CONTEXT_FILE path='"));
-        assert!(prompt.contains("artifact <CONTEXT-FILE> body"));
+        assert!(matches!(result.verdict, Verdict::Pass)); assert!(prompt.contains("diff has <DIFF-END>")); assert!(prompt.contains("spec has <SPEC-END>"));
+        assert!(prompt.contains("<CONTEXT_FILE path='")); assert!(prompt.contains("artifact <CONTEXT-FILE> body"));
     }
     #[test]
     fn blocking_consensus_fails() {
         let config = config(true, false, 2);
-        let outputs = [
-            ("{\"verdict\":\"fail\",\"bugs\":[\"bug\"],\"severity\":\"blocking\",\"violated_rules\":[]}", 0.07),
-            ("{\"verdict\":\"fail\",\"bugs\":[\"bug\"],\"severity\":\"blocking\",\"violated_rules\":[]}", 0.08),
-            (pass_json(), 0.09),
-        ];
+        let outputs = [("{\"verdict\":\"fail\",\"bugs\":[\"bug\"],\"severity\":\"blocking\",\"violated_rules\":[]}", 0.07), ("{\"verdict\":\"fail\",\"bugs\":[\"bug\"],\"severity\":\"blocking\",\"violated_rules\":[]}", 0.08), (pass_json(), 0.09)];
         let (result, _) = L3Runner::new(&config).run_with("diff", None, &[], &[], &FakeDispatcher::new(&outputs));
         assert!(matches!(result.verdict, Verdict::FailBlocking { .. }));
+    }
+    #[test]
+    fn prose_then_json_retries_once_and_succeeds() {
+        let dispatcher = FakeDispatcher::new(&[("I inspected the code and found no issues.", 0.04), (pass_json(), 0.06)]);
+        let (result, evidence) = L3Runner::new(&single_model_config()).run_with("diff", None, &[], &[], &dispatcher);
+        assert!(matches!(result.verdict, Verdict::Pass)); assert_eq!(dispatcher.prompts().len(), 2); assert!(dispatcher.prompts()[1].contains(RETRY_SYSTEM_PROMPT));
+        assert_eq!(evidence.len(), 1); assert!(evidence[0].detail.contains("retry=1"));
+        assert!((evidence[0].cost_usd - 0.10).abs() < f64::EPSILON);
+    }
+    #[test]
+    fn prose_twice_stays_inconclusive_after_retry() {
+        let dispatcher = FakeDispatcher::new(&[("I inspected the code and found no issues.", 0.04), ("Still not returning JSON.", 0.06)]);
+        let (result, evidence) = L3Runner::new(&single_model_config()).run_with("diff", None, &[], &[], &dispatcher);
+        assert!(matches!(result.verdict, Verdict::Inconclusive { .. })); assert_eq!(dispatcher.prompts().len(), 2);
+        assert!(evidence[0].detail.contains("retry=1")); assert!(evidence[0].detail.contains("retry_also_failed"));
+    }
+    #[test]
+    fn valid_json_skips_retry() {
+        let dispatcher = FakeDispatcher::new(&[(pass_json(), 0.04)]);
+        let (result, evidence) = L3Runner::new(&single_model_config()).run_with("diff", None, &[], &[], &dispatcher);
+        assert!(matches!(result.verdict, Verdict::Pass)); assert_eq!(dispatcher.prompts().len(), 1); assert!(evidence[0].detail.contains("retry=0"));
     }
 }

@@ -4,6 +4,14 @@ All notable changes to `aic` are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.2.0 (2026-04-12)
+
+### Changed
+
+- Raised the default `[integration] budget_usd_per_audit` from `2.0` to `5.0` after v0.1 dogfood showed real L3 audits cost roughly `$1.00-$2.50`.
+- Trimmed the default L3 model list to `["codex"]` and lowered `consensus_threshold` to `1`, while still allowing users to opt back into multi-model consensus in config.
+- Added a single forced retry for L3 model responses that contain no JSON object, with evidence details now recording `retry=0` or `retry=1`.
+
 ## v0.1.0 (2026-04-12)
 
 Initial release. `aic` is a cross-audit CLI that turns the manual Cross-Audit

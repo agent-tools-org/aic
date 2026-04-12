@@ -91,11 +91,11 @@ This is the scope of a follow-on tuning pass, not the MVP scope.
 
 ### High priority
 - **L3 model selection guidance**: Architecture doc should explicitly warn that flash/mini/lite class models (fewer tokens per query, tool-augmented) don't return strict JSON reliably. Recommend codex, sonnet, or a tuned judge model.
-- **Budget defaults**: raise `budget_usd_per_audit` default from 1.0 to 5.0 in the generated config.toml. L3 is the dominant cost and 1.0 is below the floor for anything useful.
-- **Reduce L3 default models** from 3 to 1-2 in the generated config. Quality > quantity with capable models. The "N-of-M consensus" assumption breaks when half the models can't produce structured output.
+- **Budget defaults**: raise `budget_usd_per_audit` default from 1.0 to 5.0 in the generated config.toml. L3 is the dominant cost and 1.0 is below the floor for anything useful. ✓ landed in v0.2-tuning
+- **Reduce L3 default models** from 3 to 1-2 in the generated config. Quality > quantity with capable models. The "N-of-M consensus" assumption breaks when half the models can't produce structured output. ✓ landed in v0.2-tuning
 
 ### Medium priority
-- **L3 prompt retry on prose response**: if a model returns prose only (no JSON hint at all), re-dispatch once with an even more forceful "you MUST return ONLY a JSON object starting with { ending with }" system message. Second-chance retry with clearer framing before falling back to synthesized Inconclusive vote.
+- **L3 prompt retry on prose response**: if a model returns prose only (no JSON hint at all), re-dispatch once with an even more forceful "you MUST return ONLY a JSON object starting with { ending with }" system message. Second-chance retry with clearer framing before falling back to synthesized Inconclusive vote. ✓ landed in v0.2-tuning
 - **Human-readable evidence rendering**: the current `report.md` renders each Evidence as a single line with detail truncated. For L3 evidence specifically, surface the actual `bugs` list as a bulleted subsection, since that's where the audit value lives.
 
 ### Low priority
