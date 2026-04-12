@@ -4,6 +4,11 @@ All notable changes to `aic` are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.2.1 (2026-04-12)
+
+- Stopped `repair_partial_json` from turning tool-call payload JSON into synthesized fail verdicts; unstructured payloads now fall back to inconclusive instead.
+- Strengthened the L2 and L3 review prompts to forbid file reads, directory listing, greps, tool calls, and missing-context failures outside the provided diff.
+
 ## v0.2.0 (2026-04-12)
 
 ### Changed

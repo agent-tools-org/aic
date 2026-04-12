@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SchemaHint { L2, L3 }
+const KNOWN_SCHEMA_HINT_FIELDS: [&str; 6] = ["verdict", "violated_rules", "bugs", "severity", "reason", "cited_lines"];
 
 pub fn extract_json_object(s: &str) -> Option<&str> {
     let text = strip_code_fence(s.trim());
@@ -70,27 +71,29 @@ fn matching_object_end(s: &str, start: usize) -> Option<usize> {
 fn repair_extracted_object(json_text: &str, schema_hint: SchemaHint) -> Option<String> {
     let value = serde_json::from_str::<Value>(json_text).ok()?;
     let object = value.as_object()?;
-    if schema_complete(object, schema_hint) {
+    if matches!(object.get("verdict"), Some(Value::String(_))) {
         return Some(json_text.to_owned());
     }
-    let violated_rules = extract_rules_from_value(&value);
-    Some(synthesize_partial(json_text, schema_hint, violated_rules))
-}
-
-fn schema_complete(object: &serde_json::Map<String, Value>, schema_hint: SchemaHint) -> bool {
-    match schema_hint {
-        SchemaHint::L2 => matches!(object.get("verdict"), Some(Value::String(_)))
-            && matches!(object.get("reason"), Some(Value::String(_)))
-            && matches!(object.get("cited_lines"), Some(Value::Array(_))),
-        SchemaHint::L3 => matches!(object.get("verdict"), Some(Value::String(_)))
-            && matches!(object.get("bugs"), Some(Value::Array(_)))
-            && matches!(object.get("severity"), Some(Value::String(_)))
-            && matches!(object.get("violated_rules"), Some(Value::Array(_))),
+    if !object.keys().any(|key| KNOWN_SCHEMA_HINT_FIELDS.contains(&key.as_str())) {
+        return None;
     }
+    let violated_rules = extract_rules_from_value(&value);
+    let bugs = extract_bugs_from_value(&value);
+    if !violated_rules.is_empty() || !bugs.is_empty() {
+        return Some(synthesize_partial(json_text, schema_hint, violated_rules));
+    }
+    Some(synthesize_inconclusive(json_text, schema_hint, &value))
 }
 
 fn extract_rules_from_value(value: &Value) -> Vec<String> {
     value.get("violated_rules")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(Value::as_str).map(|item| item.trim().to_owned()).filter(|item| !item.is_empty()).collect())
+        .unwrap_or_default()
+}
+
+fn extract_bugs_from_value(value: &Value) -> Vec<String> {
+    value.get("bugs")
         .and_then(Value::as_array)
         .map(|items| items.iter().filter_map(Value::as_str).map(|item| item.trim().to_owned()).filter(|item| !item.is_empty()).collect())
         .unwrap_or_default()
@@ -138,6 +141,25 @@ fn synthesize_partial(raw: &str, schema_hint: SchemaHint, violated_rules: Vec<St
     }
 }
 
+fn synthesize_inconclusive(raw: &str, schema_hint: SchemaHint, value: &Value) -> String {
+    let detail = value.get("reason").and_then(Value::as_str).map(str::trim).filter(|reason| !reason.is_empty()).map(str::to_owned).unwrap_or_else(|| format!("partial: {}", preview(raw)));
+    match schema_hint {
+        SchemaHint::L2 => json!({
+            "verdict": "inconclusive",
+            "reason": detail,
+            "cited_lines": [],
+        })
+        .to_string(),
+        SchemaHint::L3 => json!({
+            "verdict": "inconclusive",
+            "bugs": [detail],
+            "severity": value.get("severity").and_then(Value::as_str).unwrap_or("advisory"),
+            "violated_rules": [],
+        })
+        .to_string(),
+    }
+}
+
 fn preview(raw: &str) -> String {
     let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut preview = String::new();
@@ -156,7 +178,7 @@ mod tests {
     struct L2Response {
         verdict: String,
         reason: String,
-        cited_lines: Vec<String>,
+        #[allow(dead_code)] cited_lines: Vec<String>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -202,12 +224,20 @@ mod tests {
     }
 
     #[test]
-    fn repairs_wrong_schema_json_for_l2() {
-        let repaired = repair_partial_json("{\"pattern\":\"FRESHNESS_MARGIN\"}", SchemaHint::L2).expect("repair");
-        let parsed: L2Response = serde_json::from_str(&repaired).expect("parse");
-        assert_eq!(parsed.verdict, "fail");
-        assert!(parsed.reason.contains("FRESHNESS_MARGIN"));
-        assert!(parsed.cited_lines.is_empty());
+    fn tool_call_payloads_return_none() {
+        for raw in ["{\"dir_path\":\"/tmp\"}", "{\"file_path\":\"foo.md\"}", "{\"pattern\":\"X\"}"] {
+            assert_eq!(repair_partial_json(raw, SchemaHint::L2), None);
+        }
+    }
+
+    #[test]
+    fn schema_hint_only_payloads_become_inconclusive() {
+        let severity: L2Response = serde_json::from_str(&repair_partial_json("{\"severity\":\"blocking\"}", SchemaHint::L2).expect("repair")).expect("parse");
+        let reason: L2Response = serde_json::from_str(&repair_partial_json("{\"reason\":\"looks sketchy\"}", SchemaHint::L2).expect("repair")).expect("parse");
+        assert_eq!(severity.verdict, "inconclusive");
+        assert!(severity.reason.contains("partial:"));
+        assert_eq!(reason.verdict, "inconclusive");
+        assert_eq!(reason.reason, "looks sketchy");
     }
 
     #[test]
@@ -257,11 +287,10 @@ mod tests {
     }
 
     #[test]
-    fn repairs_prose_with_rule_hint() {
-        let raw = "No JSON returned. violated_rules=[foo,bar]";
-        let repaired = repair_partial_json(raw, SchemaHint::L3).expect("repair");
-        let parsed: L3Response = serde_json::from_str(&repaired).expect("parse");
-        assert_eq!(parsed.violated_rules, vec!["foo", "bar"]);
+    fn violated_rules_payload_still_repairs_to_fail() {
+        let parsed: L3Response = serde_json::from_str(&repair_partial_json("{\"violated_rules\":[\"r1\",\"r2\"]}", SchemaHint::L3).expect("repair")).expect("parse");
+        assert_eq!(parsed.verdict, "fail");
+        assert_eq!(parsed.violated_rules, vec!["r1", "r2"]);
     }
 
     #[test]

@@ -14,6 +14,7 @@ const PROMPT_DELIMITERS: &[&str] = &["<DIFF_START>", "<DIFF_END>", "<CONTEXT_FIL
 pub const MODEL_COST_USD: f64 = 0.05;
 const MAX_BUGS: usize = 3;
 const RETRY_SYSTEM_PROMPT: &str = "CRITICAL: Your previous response contained no JSON object. You MUST respond with ONLY a JSON object matching this schema: {verdict, bugs, severity, violated_rules}. Start with { and end with }. No reasoning, no preamble, no tool calls. This is a structured-output API, not an interactive chat.";
+const UNSTRUCTURED_OUTPUT_DETAIL: &str = "model returned unstructured output (tool-call payload or prose)";
 pub struct L3Runner<'cfg> { pub config: &'cfg L3 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VoteKind { Pass, FailBlocking, FailAdvisory, Inconclusive }
@@ -21,7 +22,7 @@ enum VoteKind { Pass, FailBlocking, FailAdvisory, Inconclusive }
 struct CallOutcome { evidence: Evidence, vote: VoteKind }
 #[derive(Debug, Deserialize)]
 struct ReviewResponse { verdict: String, #[serde(default)] bugs: Vec<Value>, #[serde(default)] severity: String, #[serde(default)] violated_rules: Vec<String> }
-enum ParseStatus { Parsed(ReviewResponse), Retry(String), Inconclusive(String) }
+enum ParseStatus { Parsed(ReviewResponse), #[allow(dead_code)] Retry(String), Inconclusive(String) }
 impl<'cfg> L3Runner<'cfg> {
     pub fn new(config: &'cfg L3) -> Self { Self { config } }
     pub fn run(&self, diff_text: &str, spec: Option<&str>, artifacts: &[PathBuf], rules: &[&Rule]) -> (LayerResult, Vec<Evidence>) {
@@ -90,10 +91,10 @@ fn parse_output(output: &str) -> ParseStatus {
     if let Some(json) = extract_json_object(output) {
         return match serde_json::from_str::<ReviewResponse>(json).map(normalize_response) {
             Ok(review) => ParseStatus::Parsed(review),
-            Err(error) => repair_review(output).unwrap_or_else(|| ParseStatus::Retry(format!("invalid JSON: {error}; raw={json}"))),
+            Err(_) => repair_review(output).unwrap_or_else(|| ParseStatus::Inconclusive(UNSTRUCTURED_OUTPUT_DETAIL.to_owned())),
         };
     }
-    repair_review(output).unwrap_or_else(|| ParseStatus::Retry(format!("no JSON object found in model output: {output}")))
+    repair_review(output).unwrap_or_else(|| ParseStatus::Inconclusive(UNSTRUCTURED_OUTPUT_DETAIL.to_owned()))
 }
 fn normalize_response(mut response: ReviewResponse) -> ReviewResponse {
     response.bugs.truncate(MAX_BUGS);
@@ -155,7 +156,7 @@ fn build_prompt(diff_text: &str, spec: Option<&str>, artifacts: &[PathBuf], rule
         format!("## Diff\n<DIFF_START>\n{diff_text}\n<DIFF_END>{artifacts}\n\n## Spec\n<SPEC_START>\n{spec_text}\n<SPEC_END>")
     };
     format!(
-        "[SYSTEM]\nYou are a code review JSON API. You respond ONLY with a single JSON object.\nYou NEVER include reasoning, explanation, preamble, postamble, or markdown fences.\nYour entire response must be a valid JSON object parseable by serde_json.\n\nRequired schema (all fields mandatory):\n{{\"verdict\":\"pass\"|\"fail\",\"bugs\":[\"<one-line description>\",\"...\"],\"severity\":\"blocking\"|\"advisory\",\"violated_rules\":[\"id\",\"...\"]}}\n\nExample response:\n{{\"verdict\":\"pass\",\"bugs\":[],\"severity\":\"advisory\",\"violated_rules\":[]}}\n\n[TASK]\n{task}{rules_section}\n\n{ordered_sections}\n\n[RESPONSE]\nRespond now with ONLY the JSON object. Your entire response must begin with {{ and end with }}.",
+        "[SYSTEM]\nYou are a code review JSON API. You respond ONLY with a single JSON object.\nYou NEVER include reasoning, explanation, preamble, postamble, or markdown fences.\nCONSTRAINT: Respond based ONLY on the content between the delimiters shown below. Do NOT read files, list directories, run greps, or make any tool calls. Do NOT ask for more context. If the diff is insufficient for a confident verdict, return verdict=\"pass\" with reason=\"insufficient_context\" — never fail on missing context alone. This is a static analysis task on the exact diff provided, not an investigation.\nYour entire response must be a valid JSON object parseable by serde_json.\n\nRequired schema (all fields mandatory):\n{{\"verdict\":\"pass\"|\"fail\",\"bugs\":[\"<one-line description>\",\"...\"],\"severity\":\"blocking\"|\"advisory\",\"violated_rules\":[\"id\",\"...\"]}}\n\nExample response:\n{{\"verdict\":\"pass\",\"bugs\":[],\"severity\":\"advisory\",\"violated_rules\":[]}}\n\n[TASK]\n{task}{rules_section}\n\n{ordered_sections}\n\n[RESPONSE]\nRespond now with ONLY the JSON object. Your entire response must begin with {{ and end with }}.",
         task = task,
         rules_section = rules_text.map(|text| format!("\n\n## Rules to enforce\n{text}")).unwrap_or_default(),
     )
@@ -263,24 +264,21 @@ mod tests {
         assert!(matches!(result.verdict, Verdict::FailBlocking { .. }));
     }
     #[test]
-    fn prose_then_json_retries_once_and_succeeds() {
-        let dispatcher = FakeDispatcher::new(&[("I inspected the code and found no issues.", 0.04), (pass_json(), 0.06)]);
+    fn prose_is_inconclusive_without_retry() {
+        let dispatcher = FakeDispatcher::new(&[("I inspected the code and found no issues.", 0.04)]);
         let (result, evidence) = L3Runner::new(&single_model_config()).run_with("diff", None, &[], &[], &dispatcher);
-        assert!(matches!(result.verdict, Verdict::Pass)); assert_eq!(dispatcher.prompts().len(), 2); assert!(dispatcher.prompts()[1].contains(RETRY_SYSTEM_PROMPT));
-        assert_eq!(evidence.len(), 1); assert!(evidence[0].detail.contains("retry=1"));
-        assert!((evidence[0].cost_usd - 0.10).abs() < f64::EPSILON);
-    }
-    #[test]
-    fn prose_twice_stays_inconclusive_after_retry() {
-        let dispatcher = FakeDispatcher::new(&[("I inspected the code and found no issues.", 0.04), ("Still not returning JSON.", 0.06)]);
-        let (result, evidence) = L3Runner::new(&single_model_config()).run_with("diff", None, &[], &[], &dispatcher);
-        assert!(matches!(result.verdict, Verdict::Inconclusive { .. })); assert_eq!(dispatcher.prompts().len(), 2);
-        assert!(evidence[0].detail.contains("retry=1")); assert!(evidence[0].detail.contains("retry_also_failed"));
+        assert!(matches!(result.verdict, Verdict::Inconclusive { .. })); assert_eq!(dispatcher.prompts().len(), 1);
+        assert_eq!(evidence[0].detail, UNSTRUCTURED_OUTPUT_DETAIL); assert!((evidence[0].cost_usd - 0.04).abs() < f64::EPSILON);
     }
     #[test]
     fn valid_json_skips_retry() {
         let dispatcher = FakeDispatcher::new(&[(pass_json(), 0.04)]);
         let (result, evidence) = L3Runner::new(&single_model_config()).run_with("diff", None, &[], &[], &dispatcher);
         assert!(matches!(result.verdict, Verdict::Pass)); assert_eq!(dispatcher.prompts().len(), 1); assert!(evidence[0].detail.contains("retry=0"));
+    }
+
+    #[test]
+    fn prompt_forbids_file_reads() {
+        assert!(build_prompt("diff", Some("spec"), &[], &[&sample_rule()], false).contains("Do NOT read files"));
     }
 }
