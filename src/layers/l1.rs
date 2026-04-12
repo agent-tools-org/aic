@@ -20,11 +20,23 @@ pub struct L1Runner<'cfg> {
 }
 
 impl<'cfg> L1Runner<'cfg> {
-    pub fn new(config: &'cfg L1, repo_root: PathBuf) -> Self {
-        Self { config, repo_root }
-    }
+    pub fn new(config: &'cfg L1, repo_root: PathBuf) -> Self { Self { config, repo_root } }
 
     pub fn run(&self) -> (LayerResult, Vec<Evidence>) {
+        if self.config.commands.is_empty() {
+            let evidence = vec![Evidence {
+                layer: Layer::L1Test,
+                signal: SignalKind::Test,
+                passed: true,
+                detail: "no L1 commands configured — layer skipped".into(),
+                cite: Some("l1:skipped".into()),
+                cost_usd: 0.0,
+            }];
+            return (
+                LayerResult { layer: Layer::L1Test, verdict: Verdict::Pass, duration_ms: 0, evidence_count: 1 },
+                evidence,
+            );
+        }
         let started_at = Instant::now();
         let evidence = self.collect_evidence();
         let result = LayerResult {
@@ -43,7 +55,7 @@ impl<'cfg> L1Runner<'cfg> {
     fn run_command(&self, command: &str) -> Evidence {
         match spawn_shell(command, &self.repo_root) {
             Ok(mut child) => run_child(command, self.config.max_duration_secs, &mut child),
-            Err(error) => failure_evidence(command, error.to_string()),
+            Err(error) => failure_evidence(command, error.to_string())
         }
     }
 }
@@ -229,7 +241,6 @@ fn truncate_detail(detail: String) -> String {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-
     fn collect_timeout_evidence(command: &str) -> (Evidence, Duration) {
         let config = L1 { commands: vec![command.into()], max_duration_secs: 1 };
         let runner = L1Runner::new(&config, PathBuf::from("."));
@@ -242,12 +253,9 @@ mod tests {
     fn true_command_passes() {
         let config = L1 { commands: vec!["true".into()], max_duration_secs: 1 };
         let runner = L1Runner::new(&config, PathBuf::from("."));
-
         let evidence = runner.collect_evidence();
         let (result, run_evidence) = runner.run();
-
-        assert_eq!(evidence.len(), 1);
-        assert!(evidence[0].passed);
+        assert_eq!(evidence.len(), 1); assert!(evidence[0].passed);
         assert!(matches!(result.verdict, Verdict::Pass));
         assert_eq!(run_evidence.len(), 1);
     }
@@ -256,12 +264,9 @@ mod tests {
     fn false_command_blocks() {
         let config = L1 { commands: vec!["false".into()], max_duration_secs: 1 };
         let runner = L1Runner::new(&config, PathBuf::from("."));
-
         let evidence = runner.collect_evidence();
         let (result, run_evidence) = runner.run();
-
-        assert_eq!(evidence.len(), 1);
-        assert!(!evidence[0].passed);
+        assert_eq!(evidence.len(), 1); assert!(!evidence[0].passed);
         assert!(matches!(result.verdict, Verdict::FailBlocking { .. }));
         assert_eq!(run_evidence.len(), 1);
     }
@@ -269,9 +274,7 @@ mod tests {
     #[test]
     fn long_command_times_out() {
         let (evidence, elapsed) = collect_timeout_evidence("sleep 2");
-
-        assert!(!evidence.passed);
-        assert!(evidence.detail.starts_with("TIMEOUT after 1s"));
+        assert!(!evidence.passed); assert!(evidence.detail.starts_with("TIMEOUT after 1s"));
         assert!(elapsed < Duration::from_secs(3));
         assert!(matches!(verdict_from_evidence(std::slice::from_ref(&evidence)), Verdict::FailBlocking { .. }));
     }
@@ -279,20 +282,19 @@ mod tests {
     #[test]
     fn background_child_is_killed_on_timeout() {
         let (evidence, elapsed) = collect_timeout_evidence("sleep 10 & wait");
-
-        assert!(!evidence.passed);
-        assert!(evidence.detail.starts_with("TIMEOUT after 1s"));
+        assert!(!evidence.passed); assert!(evidence.detail.starts_with("TIMEOUT after 1s"));
         assert!(elapsed < Duration::from_secs(3));
     }
 
     #[test]
-    fn empty_commands_are_inconclusive() {
+    fn empty_commands_are_skipped_with_pass() {
         let config = L1 { commands: Vec::new(), max_duration_secs: 1 };
         let runner = L1Runner::new(&config, PathBuf::from("."));
         let (result, run_evidence) = runner.run();
-
-        assert!(matches!(result.verdict, Verdict::Inconclusive { .. }));
-        assert_eq!(result.evidence_count, 0);
-        assert!(run_evidence.is_empty());
+        assert!(matches!(result.verdict, Verdict::Pass));
+        assert_eq!(result.duration_ms, 0); assert_eq!(result.evidence_count, 1);
+        assert_eq!(run_evidence.len(), 1); assert!(run_evidence[0].passed);
+        assert_eq!(run_evidence[0].detail, "no L1 commands configured — layer skipped");
+        assert_eq!(run_evidence[0].cite.as_deref(), Some("l1:skipped"));
     }
 }

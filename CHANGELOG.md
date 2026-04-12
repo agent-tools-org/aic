@@ -4,6 +4,10 @@ All notable changes to `aic` are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.2.2 (2026-04-12)
+
+- Fixed: L1 now returns Pass with a single synthesized `skipped` Evidence when no commands are configured, instead of Inconclusive. This prevents an empty layer from poisoning the aggregator's final verdict in dogfood scenarios where the audit runs on diffs from an external repo without a local test suite.
+
 ## v0.2.1 (2026-04-12)
 
 - Stopped `repair_partial_json` from turning tool-call payload JSON into synthesized fail verdicts; unstructured payloads now fall back to inconclusive instead.
