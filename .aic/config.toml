@@ -1,0 +1,36 @@
+# aic audit config — see https://...
+
+[layers.l0]
+commands = [
+    "cargo check",
+    "cargo clippy -- -D warnings",
+]
+secret_scan = true
+address_verify = true
+
+[layers.l1]
+commands = ["cargo test --lib"]
+max_duration_secs = 120
+
+[layers.l2]
+enabled = true
+model = "gemini-flash"
+rules_dir = ".aic/rules"
+
+[layers.l3]
+enabled = true
+models = [
+    "gemini",
+    "codex",
+    "claude-haiku",
+]
+swap = true
+consensus_threshold = 2
+
+[layers.l4]
+scripts = [".aic/checks/*.sh"]
+
+[integration]
+aid_auto_audit = false
+aib_auto_block = true
+budget_usd_per_audit = 2.0

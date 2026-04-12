@@ -1,0 +1,16 @@
+/target
+.cargo-target/
+*.swp
+*.swo
+*~
+.DS_Store
+.env
+.env.*
+node_modules/
+
+# Local audit outputs — user-specific, not version-controlled
+.aic/audits/
+
+# IDE
+.idea/
+.vscode/

@@ -1,0 +1,131 @@
+# aic
+
+**Cross-audit outputs from `aid` agent dispatch with a 5-layer verification pipeline.**
+
+## Why aic?
+
+LLM agents are efficient but fallible. Research shows that as tasks get harder, self-reflection fails: **SycEval** found 58% sycophancy in LLM judging, and **AlpacaEval 2.0** highlights significant length bias and position bias in model-based evaluation. Manual "Cross-Audit Protocols"—where one agent's work is rigorously critiqued by others—are effective but become a scalable pain for human orchestrators.
+
+`aic` turns this protocol into a scriptable, CI-grade pipeline. It provides deterministic gates and swap-augmented LLM judging to ensure that code changes are not just plausible, but correct. It complements `aid` (dispatch) and `aib` (backlog) as the fourth pillar of the AI dev toolchain.
+
+## Install
+
+```bash
+cargo install --path .
+```
+
+## 60-Second Quickstart
+
+1. **Initialize**: `aic init` to scaffold the `.aic/` directory.
+2. **Author Rules**: Edit `.aic/rules/*.md` to define project-specific adversarial checks.
+3. **Audit**: Run an audit on a standalone diff or a completed `aid` task.
+   ```bash
+   aic audit --diff fix-bug.patch
+   ```
+
+### Exit Codes
+- `0`: **Pass** — All layers passed or only advisory failures.
+- `1`: **FailBlocking** — Hard failure in a critical layer or rule.
+- `2`: **FailAdvisory** — Non-blocking warning detected.
+- `3`: **Inconclusive** — Pipeline could not reach a verdict (e.g., budget exceeded).
+
+## The 5 Layers
+
+Verification is layered by cost and latency. Each layer can short-circuit the pipeline on failure.
+
+| Layer | Type | Cost | Latency | Purpose |
+|-------|------|------|---------|---------|
+| **L0** | Static | Free | <5s | Deterministic checks: `cargo check`, `clippy`, secret scanning. |
+| **L1** | Test | Free | 10-120s | Execution: Runs project test suites and verification scripts. |
+| **L2** | Checklist | ~$0.01 | ~5s | Rule-based auditing: Evaluates `.aic/rules/*.md` via fast LLMs. |
+| **L3** | Cross-LLM | ~$0.50 | ~30s | Multi-agent debate: Swap-augmented voting across N models. |
+| **L4** | Evidence | Varies | ~10s | (Future) Executable claims: `crpc` calls and trace verification. |
+
+## Config Reference (`.aic/config.toml`)
+
+```toml
+[layers.l0]
+commands = ["cargo check", "cargo clippy -- -D warnings"]
+secret_scan = true
+
+[layers.l1]
+commands = ["cargo test --lib"]
+max_duration_secs = 120
+
+[layers.l2]
+enabled = true
+model = "gemini-flash"
+rules_dir = ".aic/rules"
+
+[layers.l3]
+enabled = true
+models = ["gemini", "codex", "claude-haiku"]
+swap = true
+consensus_threshold = 2
+
+[integration]
+aib_auto_block = true
+budget_usd_per_audit = 2.0
+```
+
+## Rule Authoring
+
+Rules live in `.aic/rules/*.md` with YAML frontmatter.
+
+```markdown
+---
+id: no-unwrap-in-prod
+severity: advisory
+scope: ['src/**/*.rs']
+layer: l2
+---
+# No unwrap() in production code
+Flag uses of .unwrap() outside test modules. Prefer .expect() or `?`.
+Ask the model: "Does the diff add any .unwrap() calls outside of tests?"
+Pass if no new unwraps in non-test code. Fail otherwise.
+```
+
+## Integration
+
+- **ai-board**: Use `aic audit --board-item <id>` to automatically transition `aib` items to `blocked` (on failure) or `ready-for-review` (on pass).
+- **v0.2 Preview**: Future `aid run --audit` flag will enable seamless post-generation auditing.
+
+## Architecture
+
+`aic` follows an external, non-self-reflective auditing pattern grounded in research like **Agentless** and **LDB**. See `docs/architecture.md` for the full design doc and `docs/dogfood.md` for the v0.1 dogfood validation run against real smart-router bug fixes.
+
+```
+aid task output (diff + artifacts)
+       │
+       ▼
+ ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+ │   L0 Static   │ ──▶ │    L1 Test    │ ──▶ │ L2 Checklist  │
+ └───────────────┘     └───────────────┘     └───────────────┘
+       │                     │                     │
+       ▼                     ▼                     ▼
+ ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+ │  Verdict/Log  │ ◀── │  L4 Evidence  │ ◀── │  L3 Cross-LLM │
+ └───────────────┘     └───────────────┘     └───────────────┘
+```
+
+## Research Grounding
+
+`aic` is built on principles from:
+- **SycEval**: Mitigating judge sycophancy (58% base rate) via reference-backed critiques.
+- **AlpacaEval 2.0**: Nullifying position/length bias via swap-augmentation.
+- **LDB / Agentless**: Prioritizing deterministic execution traces and static gates over raw LLM intuition.
+
+## Limitations (v0.1)
+
+- Small LLM judges (e.g. `gemini-2.5-flash-lite`) struggle to produce strict JSON output; use a capable model such as `codex` for L3 in production.
+- Default `budget_usd_per_audit = 1.0` is tight for a real L3 run; raise to `5.0` when enabling L3 in config.
+- L4 executable evidence (native `crpc` / on-chain verification) is scaffolded but not yet wired.
+- No real-time trajectory watch mode (planned for v0.2).
+- `aid run --audit` upstream flag is tracked at [agent-tools-org/ai-dispatch#98](https://github.com/agent-tools-org/ai-dispatch/issues/98); not yet shipped.
+
+## Roadmap (v0.2)
+
+- **Trajectory Critic**: Real-time scoring during `aid` execution.
+- **L4 First-Class**: Native `crpc` and `verify-addresses` integration.
+- **Checklist Gen**: Auto-generate `.aic/rules/` from historical diffs.
+- **Single-Claim Verify**: `aic verify <claim>` for targeted fact-checking.
