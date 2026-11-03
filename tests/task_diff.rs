@@ -163,28 +163,14 @@ fn invalid_utf8_patch_reaches_judge_instead_of_runtime_error() -> TestResult {
 }
 
 #[test]
-fn traversal_task_id_cannot_write_outside_temp_directory() -> TestResult {
+fn traversal_task_id_is_refused_before_any_write() -> TestResult {
     let fixture = Fixture::new()?;
-    let task_id = "x/../../escaped";
-    // Let collection succeed for this exact hostile ID, but fail rule loading before persistence.
-    fs::write(
-        fixture.root.path().join("bin/aid"),
-        FAKE_AID.replace("[ \"$2\" = t-task ]", "[ \"$2\" = x/../../escaped ]"),
-    )?;
-    fs::write(
-        fixture.repo.join(".aic/rules/check.md"),
-        "---\ninvalid: [\n---\n",
-    )?;
-    let old_prefix = fixture.root.path().join("tmp/aic-x");
-    fs::create_dir(&old_prefix)?;
-    fixture.audit(task_id)?.assert().code(4);
-    assert!(fixture.root.path().join("show-cwd").exists());
-    for entry in fs::read_dir(fixture.root.path())? {
-        assert!(!entry?.file_name().to_string_lossy().starts_with("escaped"));
-    }
-    assert!(!fixture.root.path().join("context").exists());
-    fs::remove_dir(old_prefix)?;
-    fixture.assert_temp_removed()
+    let output = fixture.audit("x/../../escaped")?.assert().code(4).get_output().stderr.clone();
+    assert!(String::from_utf8(output)?.contains("invalid task id"));
+    assert!(!fixture.root.path().join("show-cwd").exists(), "aid must not run");
+    assert!(!fixture.repo.join(".aic/audits").exists());
+    assert!(!fixture.repo.join(".aic/escaped").exists());
+    Ok(())
 }
 
 #[test]
@@ -192,7 +178,7 @@ fn quoted_non_ascii_path_matches_scoped_rule_through_aid() -> TestResult {
     let fixture = Fixture::new()?;
     fs::write(
         fixture.repo.join(".aic/rules/check.md"),
-        "---\nid: check\nseverity: blocking\nscope: ['src/café.rs']\nlayer: l2\n---\nCheck café.\n",
+        "---\nid: check\nseverity: blocking\nscope: ['src/café.rs']\nlayer: l2\n---\n# Check\nCheck café.\n",
     )?;
     fs::write(
         fixture.root.path().join("patch"),

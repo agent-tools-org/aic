@@ -82,6 +82,10 @@ fn audit_target(
     let task_id = args
         .task_id
         .ok_or_else(|| anyhow!("missing task-id or --diff"))?;
+    // The id names the report directory, so it must not be able to leave it.
+    if !task_id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_') {
+        bail!("invalid task id: {task_id}");
+    }
     let diff_path = fetch_task_diff(&task_id, repo_root)?;
     Ok((task_id, diff_path.path().to_owned(), Some(diff_path)))
 }
