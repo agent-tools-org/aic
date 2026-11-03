@@ -17,7 +17,7 @@ curl -fsSL https://aid.agent-tools.org/install.sh | bash
 The script installs aic alongside aid. Or install from source:
 
 ```bash
-cargo install --git https://github.com/agent-tools-org/aic --tag v0.3.0 --locked
+cargo install --git https://github.com/agent-tools-org/aic --tag v0.3.1 --locked
 ```
 
 The crates.io package named `aic` is a different project.
