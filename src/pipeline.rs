@@ -6,9 +6,12 @@ use crate::aggregator::Aggregator;
 use crate::config::Config;
 use crate::layers::{aid_dispatch::RealAidDispatcher, l0::L0Runner, l1::L1Runner, l2, l2::L2Runner, l3, l3::L3Runner};
 use crate::rules::{load_rules_dir, Rule, RuleLayer};
-use crate::types::{AuditRequest, AuditResult, Evidence, Layer, LayerResult};
+use crate::types::{AuditRequest, AuditResult, Evidence, Layer, LayerResult, Verdict};
 use anyhow::{Context, Result};
 use std::{fs, path::{Path, PathBuf}, time::Instant};
+
+/// A judge reads the diff through its own file tool, so a partial read must stay improbable.
+const MAX_JUDGE_DIFF_BYTES: usize = 128 * 1024;
 
 pub struct Pipeline<'cfg> {
     pub config: &'cfg Config,
@@ -73,6 +76,19 @@ impl<'cfg> Pipeline<'cfg> {
             if over_budget(&evidence, budget) {
                 return Ok(self.finalize(layer_results, evidence, start, budget));
             }
+        }
+
+        let judge = [Layer::L2Checklist, Layer::L3CrossLlm].into_iter().find(|layer| {
+            !should_skip(&request, *layer) && match layer {
+                Layer::L2Checklist => self.config.layers.l2.enabled,
+                _ => self.config.layers.l3.enabled,
+            }
+        });
+        if let Some(layer) = judge.filter(|_| diff_text.len() > MAX_JUDGE_DIFF_BYTES) {
+            let reason = format!("diff of {} bytes exceeds the {MAX_JUDGE_DIFF_BYTES} byte judge limit", diff_text.len());
+            layer_results.push(LayerResult { layer, verdict: Verdict::Inconclusive { reason: reason.clone() }, duration_ms: 0, evidence_count: 1 });
+            evidence.push(Evidence { layer, signal: crate::types::SignalKind::Script, passed: false, detail: reason, cite: Some("aic:oversized-diff".into()), cost_usd: 0.0 });
+            return Ok(self.finalize(layer_results, evidence, start, budget));
         }
 
         if self.config.layers.l2.enabled && !should_skip(&request, Layer::L2Checklist) {

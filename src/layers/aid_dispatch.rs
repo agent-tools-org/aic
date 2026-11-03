@@ -52,6 +52,7 @@ impl AidDispatcher for RealAidDispatcher {
             .arg("show")
             .arg(&task_id)
             .arg("--output")
+            .arg("--full")
             .output()
             .with_context(|| format!("failed to run `aid show {task_id} --output`"))?;
         if !show_output.status.success() {

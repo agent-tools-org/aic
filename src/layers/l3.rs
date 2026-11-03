@@ -157,7 +157,7 @@ fn build_prompt(diff_text: &str, spec: Option<&str>, artifacts: &[PathBuf], rule
         format!("## Diff\n<DIFF_START>\n{diff_text}\n<DIFF_END>{artifacts}\n\n## Spec\n<SPEC_START>\n{spec_text}\n<SPEC_END>")
     };
     format!(
-        "[SYSTEM]\nYou are a code review JSON API. You respond ONLY with a single JSON object.\nYou NEVER include reasoning, explanation, preamble, postamble, or markdown fences.\nCONSTRAINT: Respond based ONLY on the content between the delimiters shown below. Do NOT read any file other than this one, list directories, run greps, or make any other tool call. Do NOT ask for more context. If the diff is insufficient for a confident verdict, return verdict=\"pass\" with reason=\"insufficient_context\" — never fail on missing context alone. This is a static analysis task on the exact diff provided, not an investigation.\nYour entire response must be a valid JSON object parseable by serde_json.\n\nRequired schema (all fields mandatory):\n{{\"verdict\":\"pass\"|\"fail\",\"bugs\":[\"<one-line description>\",\"...\"],\"severity\":\"blocking\"|\"advisory\",\"violated_rules\":[\"id\",\"...\"]}}\n\nExample response:\n{{\"verdict\":\"pass\",\"bugs\":[],\"severity\":\"advisory\",\"violated_rules\":[]}}\n\n[TASK]\n{task}{rules_section}\n\n{ordered_sections}\n\n[RESPONSE]\nRespond now with ONLY the JSON object. Your entire response must begin with {{ and end with }}.",
+        "[SYSTEM]\nYou are a code review JSON API. You respond ONLY with a single JSON object.\nYou NEVER include reasoning, explanation, preamble, postamble, or markdown fences.\nCONSTRAINT: Respond based ONLY on the content between the delimiters shown below. Read every line of this file; if a tool shortens its output, keep reading the rest until you have seen all of it. If you could not see every line, return verdict=\"inconclusive\". Do NOT read any other file, list directories, run greps, or make any other tool call. Do NOT ask for more context. If you saw every line and the diff is still insufficient for a confident verdict, return verdict=\"pass\" with reason=\"insufficient_context\" — never fail on missing context alone. This is a static analysis task on the exact diff provided, not an investigation.\nYour entire response must be a valid JSON object parseable by serde_json.\n\nRequired schema (all fields mandatory):\n{{\"verdict\":\"pass\"|\"fail\"|\"inconclusive\",\"bugs\":[\"<one-line description>\",\"...\"],\"severity\":\"blocking\"|\"advisory\",\"violated_rules\":[\"id\",\"...\"]}}\n\nExample response:\n{{\"verdict\":\"pass\",\"bugs\":[],\"severity\":\"advisory\",\"violated_rules\":[]}}\n\n[TASK]\n{task}{rules_section}\n\n{ordered_sections}\n\n[RESPONSE]\nRespond now with ONLY the JSON object. Your entire response must begin with {{ and end with }}.",
         task = task,
         rules_section = rules_text.map(|text| format!("\n\n## Rules to enforce\n{text}")).unwrap_or_default(),
     )
@@ -281,6 +281,6 @@ mod tests {
 
     #[test]
     fn prompt_limits_reads_to_context() {
-        assert!(build_prompt("diff", Some("spec"), &[], &[&sample_rule()], false).contains("Do NOT read any file other than this one"));
+        assert!(build_prompt("diff", Some("spec"), &[], &[&sample_rule()], false).contains("Do NOT read any other file"));
     }
 }

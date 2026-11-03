@@ -99,5 +99,5 @@ fn prompt_includes_artifacts_and_sanitizes_diff_delimiters() {
 #[test]
 fn prompt_limits_reads_to_context() {
     let prompt = build_prompt(&Rule { id: "rule".into(), severity: RuleSeverity::Advisory, scope: vec!["src/**/*.rs".into()], layer: RuleLayer::L2, title: "Rule".into(), body: "Body".into(), source_path: PathBuf::from("rule.md") }, "diff", &[]);
-    assert!(prompt.contains("Do NOT read any file other than this one"));
+    assert!(prompt.contains("Do NOT read any other file"));
 }

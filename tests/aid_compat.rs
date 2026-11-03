@@ -155,10 +155,34 @@ fn check_final_answers(root: &Path) -> Result<(), Box<dyn Error>> {
             }
         }
         let context = fs::read_to_string(root.join("prompt"))?;
-        assert!(context.contains("Do NOT read any file other than this one"));
+        assert!(context.contains("Do NOT read any other file"));
         assert!(context.contains("or make any other tool call"));
         let path = fs::read_to_string(root.join("path"))?;
         assert!(!Path::new(&path).exists());
     }
+    Ok(())
+}
+
+#[test]
+fn oversized_diff_is_inconclusive_without_calling_a_judge() -> Result<(), Box<dyn Error>> {
+    let dir = tempdir()?;
+    let aid = dir.path().join("aid");
+    fs::write(&aid, "#!/bin/sh\ntouch \"$RECORD/called\"\n")?;
+    fs::set_permissions(&aid, fs::Permissions::from_mode(0o755))?;
+    let lines = "+filler line\n".repeat(21_000);
+    fs::write(dir.path().join("big.patch"), format!("diff --git a/a b/a\n+++ b/a\n@@\n{lines}"))?;
+    let path = format!("{}:{}", dir.path().display(), std::env::var("PATH")?);
+    let output = assert_cmd::Command::cargo_bin("aic")?
+        .current_dir(dir.path())
+        .env("PATH", path)
+        .env("RECORD", dir.path())
+        .args(["audit", "--diff", "big.patch"])
+        .assert()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    assert!(String::from_utf8(output)?.contains("byte judge limit"));
+    assert!(!dir.path().join("called").exists());
     Ok(())
 }
