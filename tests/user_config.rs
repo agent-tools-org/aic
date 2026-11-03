@@ -62,7 +62,7 @@ fn missing_task_is_runtime_error() -> TestResult {
         .get_output()
         .stderr
         .clone();
-    assert!(String::from_utf8(output)?.contains("Error: aid show t-missing --diff failed"));
+    assert!(String::from_utf8(output)?.contains("Error: aid show t-missing --json failed"));
     Ok(())
 }
 

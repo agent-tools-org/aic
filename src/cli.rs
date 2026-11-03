@@ -6,10 +6,11 @@ use crate::config::Config;
 use crate::init;
 use crate::persist::{persist_audit, render_markdown_report};
 use crate::pipeline::Pipeline;
+use crate::task_diff::fetch_task_diff;
 use crate::types::{AuditContext, AuditRequest, Verdict};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use clap::{Args, Parser, Subcommand};
-use std::{fs, path::{Path, PathBuf}, process::Command};
+use std::path::{Path, PathBuf};
 use tracing_subscriber::EnvFilter;
 
 pub fn run() -> Result<()> {
@@ -65,23 +66,6 @@ fn audit_target(args: AuditArgs, repo_root: &Path) -> Result<(String, PathBuf)> 
     let task_id = args.task_id.ok_or_else(|| anyhow!("missing task-id or --diff"))?;
     let diff_path = fetch_task_diff(&task_id, repo_root)?;
     Ok((task_id, diff_path))
-}
-
-fn fetch_task_diff(task_id: &str, repo_root: &Path) -> Result<PathBuf> {
-    let output = Command::new("aid")
-        .arg("show")
-        .arg(task_id)
-        .arg("--diff")
-        .current_dir(repo_root)
-        .output()
-        .with_context(|| format!("run aid show {task_id} --diff"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        bail!("aid show {task_id} --diff failed: {}", if stderr.is_empty() { "no stderr" } else { &stderr });
-    }
-    let path = std::env::temp_dir().join(format!("aic-{task_id}-{}.diff", std::process::id()));
-    fs::write(&path, output.stdout).with_context(|| format!("write {}", path.display()))?;
-    Ok(path)
 }
 
 fn exit_for_verdict(verdict: &Verdict) {

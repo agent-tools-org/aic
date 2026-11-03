@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## v0.3.1 (2026-11-03)
 
+- Build task diffs from Git and aid JSON metadata, including in-place and untracked changes.
+
 - Return exit code 4 for runtime errors while preserving audit verdict exit codes.
 - Load user configuration with recursive project overrides and explicit command defaults.
 
