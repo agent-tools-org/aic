@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## v0.3.1 (2026-11-03)
 
+- Preserve quoted, spaced, renamed, copied and deleted touched paths; audit non-UTF-8 patches.
+
 - Collect task patches with `aid show <task-id> --patch`; require an aid release supporting it.
 - Keep raw patches in automatically removed temporary files independent of task IDs.
 - Run manual task audits from the task checkout because L0 and L1 use the current directory.

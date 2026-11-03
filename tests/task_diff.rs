@@ -151,19 +151,14 @@ fn empty_stdout_passes_without_judge() -> TestResult {
 }
 
 #[test]
-fn invalid_utf8_is_runtime_error_without_panic() -> TestResult {
+fn invalid_utf8_patch_reaches_judge_instead_of_runtime_error() -> TestResult {
     let fixture = Fixture::new()?;
     let mut patch = PATCH.as_bytes().to_vec();
     patch.push(0xff);
     fs::write(fixture.root.path().join("patch"), patch)?;
-    let output = fixture
-        .audit("t-task")?
-        .assert()
-        .code(4)
-        .get_output()
-        .stderr
-        .clone();
-    assert!(!String::from_utf8(output)?.contains("panicked"));
+    fixture.audit("t-task")?.assert().code(1);
+    let context = fs::read_to_string(fixture.root.path().join("context"))?;
+    assert!(context.contains('\u{fffd}'));
     fixture.assert_temp_removed()
 }
 
@@ -171,12 +166,15 @@ fn invalid_utf8_is_runtime_error_without_panic() -> TestResult {
 fn traversal_task_id_cannot_write_outside_temp_directory() -> TestResult {
     let fixture = Fixture::new()?;
     let task_id = "x/../../escaped";
-    // Let collection succeed for this exact hostile ID, but stop before report persistence.
+    // Let collection succeed for this exact hostile ID, but fail rule loading before persistence.
     fs::write(
         fixture.root.path().join("bin/aid"),
         FAKE_AID.replace("[ \"$2\" = t-task ]", "[ \"$2\" = x/../../escaped ]"),
     )?;
-    fs::write(fixture.root.path().join("patch"), [0xff])?;
+    fs::write(
+        fixture.repo.join(".aic/rules/check.md"),
+        "---\ninvalid: [\n---\n",
+    )?;
     let old_prefix = fixture.root.path().join("tmp/aic-x");
     fs::create_dir(&old_prefix)?;
     fixture.audit(task_id)?.assert().code(4);
@@ -186,5 +184,22 @@ fn traversal_task_id_cannot_write_outside_temp_directory() -> TestResult {
     }
     assert!(!fixture.root.path().join("context").exists());
     fs::remove_dir(old_prefix)?;
+    fixture.assert_temp_removed()
+}
+
+#[test]
+fn quoted_non_ascii_path_matches_scoped_rule_through_aid() -> TestResult {
+    let fixture = Fixture::new()?;
+    fs::write(
+        fixture.repo.join(".aic/rules/check.md"),
+        "---\nid: check\nseverity: blocking\nscope: ['src/café.rs']\nlayer: l2\n---\nCheck café.\n",
+    )?;
+    fs::write(
+        fixture.root.path().join("patch"),
+        "diff --git \"a/src/caf\\303\\251.rs\" \"b/src/caf\\303\\251.rs\"\n\
+        --- \"a/src/caf\\303\\251.rs\"\n+++ \"b/src/caf\\303\\251.rs\"\n@@\n+x\n",
+    )?;
+    fixture.audit("t-task")?.assert().code(1);
+    assert!(fs::read_to_string(fixture.root.path().join("context"))?.contains("Check café."));
     fixture.assert_temp_removed()
 }

@@ -1,5 +1,5 @@
 // src/pipeline.rs
-// Audit pipeline orchestration. Exports: Pipeline and diff parsing helper.
+// Audit pipeline orchestration. Exports: Pipeline; touched paths come from touched_paths.
 // Deps: aggregator, config, layers, types, std::fs/time/path.
 
 use crate::aggregator::Aggregator;
@@ -25,9 +25,10 @@ impl<'cfg> Pipeline<'cfg> {
 
     pub fn execute(&self, request: AuditRequest) -> Result<AuditResult> {
         let start = Instant::now();
-        let touched_files = parse_diff_touched_files(&request.diff_path)?;
-        let diff_text = fs::read_to_string(&request.diff_path)
+        let diff_bytes = fs::read(&request.diff_path)
             .with_context(|| format!("read diff {}", request.diff_path.display()))?;
+        let diff_text = String::from_utf8_lossy(&diff_bytes);
+        let touched_files = crate::touched_paths::parse(&diff_text);
         let mut layer_results = Vec::new();
         let mut evidence = Vec::new();
 
@@ -137,27 +138,6 @@ impl<'cfg> Pipeline<'cfg> {
 
 fn should_skip(request: &AuditRequest, layer: Layer) -> bool {
     request.skip_layers.contains(&layer)
-}
-
-pub fn parse_diff_touched_files(path: &Path) -> Result<Vec<PathBuf>> {
-    let text = fs::read_to_string(path).with_context(|| format!("read diff {}", path.display()))?;
-    let mut files = Vec::new();
-    for line in text.lines() {
-        let candidate = if let Some(rest) = line.strip_prefix("diff --git ") {
-            rest.split_whitespace().nth(1).and_then(|item| item.strip_prefix("b/"))
-        } else if let Some(rest) = line.strip_prefix("+++ ") {
-            rest.split_whitespace().next().and_then(|item| item.strip_prefix("b/"))
-        } else {
-            None
-        };
-        if let Some(file) = candidate.filter(|file| *file != "/dev/null") {
-            let path = PathBuf::from(file);
-            if !files.contains(&path) {
-                files.push(path);
-            }
-        }
-    }
-    Ok(files)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]

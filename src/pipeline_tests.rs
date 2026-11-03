@@ -9,9 +9,9 @@ use tempfile::tempdir;
 fn parses_touched_files_from_unified_diff() -> Result<()> {
     let dir = tempdir()?;
     let diff = dir.path().join("diff.patch");
-    fs::write(&diff, "diff --git a/src/lib.rs b/src/lib.rs\n+++ b/src/main.rs\n+++ /dev/null\n")?;
+    fs::write(&diff, "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/main.rs\n+++ /dev/null\n")?;
 
-    let files = parse_diff_touched_files(&diff)?;
+    let files = crate::touched_paths::parse(&fs::read_to_string(&diff)?);
 
     assert_eq!(files, vec![PathBuf::from("src/lib.rs"), PathBuf::from("src/main.rs")]);
     Ok(())
