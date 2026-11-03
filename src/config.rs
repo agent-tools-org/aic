@@ -31,19 +31,22 @@ impl Config {
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Self::for_repo(repo_root)),
             Err(error) => return Err(error).with_context(|| format!("read {}", path.display())),
         };
-        let mut config: Self = toml::from_str(&contents)
+        let value: toml::Value = toml::from_str(&contents)
             .with_context(|| format!("parse {}", path.display()))?;
-        let value: toml::Value = toml::from_str(&contents)?;
+        let has_commands = |layer: &str| {
+            value.get("layers").and_then(|layers| layers.get(layer))
+                .and_then(|settings| settings.get("commands")).is_some()
+        };
+        let l0_explicit = has_commands("l0");
+        let l1_explicit = has_commands("l1");
+        let mut config: Self = value.try_into()
+            .with_context(|| format!("parse {}", path.display()))?;
         if !repo_root.join("Cargo.toml").is_file() {
-            for layer in ["l0", "l1"] {
-                let explicit = value.get("layers").and_then(|v| v.get(layer))
-                    .and_then(|v| v.get("commands")).is_some();
-                if !explicit {
-                    match layer {
-                        "l0" => config.layers.l0.commands.clear(),
-                        _ => config.layers.l1.commands.clear(),
-                    }
-                }
+            if !l0_explicit {
+                config.layers.l0.commands.clear();
+            }
+            if !l1_explicit {
+                config.layers.l1.commands.clear();
             }
         }
         Ok(config)

@@ -173,7 +173,14 @@ fn install_fake_aid_with_logging(dir: &Path, log_path: &Path) -> Result<PathGuar
     install_fake_aid_script(
         dir,
         &format!(
-            "#!/bin/sh\nprintf '%s\\n--PROMPT--\\n' \"$3\" >> \"{}\"\nprintf '%s\\n' '{{\"verdict\":\"pass\",\"reason\":\"ok\",\"cited_lines\":[],\"bugs\":[],\"severity\":\"advisory\"}}'\n",
+            concat!(
+                "#!/bin/sh\n",
+                "cat \"$4\" >> \"{}\" || exit 1\n",
+                "printf '\\n--PROMPT--\\n' >> \"{}\"\n",
+                "printf '%s\\n' '{{\"verdict\":\"pass\",\"reason\":\"ok\",",
+                "\"cited_lines\":[],\"bugs\":[],\"severity\":\"advisory\"}}'\n",
+            ),
+            log_path.display(),
             log_path.display()
         ),
     )
