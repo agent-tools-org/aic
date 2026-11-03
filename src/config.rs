@@ -13,12 +13,40 @@ pub struct Config {
 }
 impl Config {
     pub fn load(path: &Path) -> Result<Self> {
+        Self::load_for_repo(path, &std::env::current_dir().context("resolve repository root")?)
+    }
+
+    pub fn for_repo(repo_root: &Path) -> Self {
+        let mut config = Self::default();
+        if !repo_root.join("Cargo.toml").is_file() {
+            config.layers.l0.commands.clear();
+            config.layers.l1.commands.clear();
+        }
+        config
+    }
+
+    pub fn load_for_repo(path: &Path, repo_root: &Path) -> Result<Self> {
         let contents = match fs::read_to_string(path) {
             Ok(contents) => contents,
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Self::default()),
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Self::for_repo(repo_root)),
             Err(error) => return Err(error).with_context(|| format!("read {}", path.display())),
         };
-        toml::from_str(&contents).with_context(|| format!("parse {}", path.display()))
+        let mut config: Self = toml::from_str(&contents)
+            .with_context(|| format!("parse {}", path.display()))?;
+        let value: toml::Value = toml::from_str(&contents)?;
+        if !repo_root.join("Cargo.toml").is_file() {
+            for layer in ["l0", "l1"] {
+                let explicit = value.get("layers").and_then(|v| v.get(layer))
+                    .and_then(|v| v.get("commands")).is_some();
+                if !explicit {
+                    match layer {
+                        "l0" => config.layers.l0.commands.clear(),
+                        _ => config.layers.l1.commands.clear(),
+                    }
+                }
+            }
+        }
+        Ok(config)
     }
 }
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
@@ -99,7 +127,7 @@ fn default_true() -> bool { true }
 fn l0_commands() -> Vec<String> { strings(&["cargo check", "cargo clippy -- -D warnings"]) }
 fn l1_commands() -> Vec<String> { strings(&["cargo test --lib"]) }
 fn l1_max_duration_secs() -> u64 { 120 }
-fn l2_model() -> String { "gemini-flash".to_owned() }
+fn l2_model() -> String { "codex".to_owned() }
 fn rules_dir() -> String { ".aic/rules".to_owned() }
 fn l3_models() -> Vec<String> { strings(&["codex"]) }
 fn consensus_threshold() -> u8 { 1 }

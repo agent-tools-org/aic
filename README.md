@@ -11,8 +11,16 @@ LLM agents are efficient but fallible. Research shows that as tasks get harder, 
 ## Install
 
 ```bash
-cargo install --path .
+curl -fsSL https://aid.agent-tools.org/install.sh | bash
 ```
+
+The script installs aic alongside aid. Or install from source:
+
+```bash
+cargo install --git https://github.com/agent-tools-org/aic --tag v0.3.0 --locked
+```
+
+The crates.io package named `aic` is a different project.
 
 ## 60-Second Quickstart
 
@@ -43,6 +51,11 @@ Verification is layered by cost and latency. Each layer can short-circuit the pi
 
 ## Config Reference (`.aic/config.toml`)
 
+L2 `model` and L3 `models` are aid agent names. Omitted L0/L1 `commands` use
+Cargo defaults only when the repository root contains `Cargo.toml`; otherwise
+they skip commands. Explicit lists, including `[]`, always win. `aic init`
+writes commands for the current repository.
+
 ```toml
 [layers.l0]
 commands = ["cargo check", "cargo clippy -- -D warnings"]
@@ -54,18 +67,18 @@ max_duration_secs = 120
 
 [layers.l2]
 enabled = true
-model = "gemini-flash"
+model = "codex" # aid agent name
 rules_dir = ".aic/rules"
 
 [layers.l3]
 enabled = true
-models = ["gemini", "codex", "claude-haiku"]
+models = ["codex"] # aid agent names
 swap = true
-consensus_threshold = 2
+consensus_threshold = 1
 
 [integration]
 aib_auto_block = true
-budget_usd_per_audit = 2.0
+budget_usd_per_audit = 5.0
 ```
 
 ## Rule Authoring

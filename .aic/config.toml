@@ -14,12 +14,12 @@ max_duration_secs = 120
 
 [layers.l2]
 enabled = true
-model = "gemini-flash"
+model = "codex" # aid agent name
 rules_dir = ".aic/rules"
 
 [layers.l3]
 enabled = true
-models = ["codex"]
+models = ["codex"] # aid agent names
 swap = true
 consensus_threshold = 1
 

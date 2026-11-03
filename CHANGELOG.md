@@ -4,6 +4,13 @@ All notable changes to `aic` are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.3.0 (2026-11-03)
+
+- Use the configured aid agent for L2, defaulting to codex.
+- Dispatch read-only judges with prompt files, explicit task profiles, and audit and verification disabled.
+- Apply default Cargo checks and tests only to repositories containing Cargo.toml.
+- Add four-target release binaries with SHA-256 checksums and document binary and Git installs.
+
 ## v0.2.3 (2026-04-12)
 
 - Fixed: empty-diff early exit — `aic audit <task-id>` on a task with no diff content (e.g. pure text/research task invoked via `aid run --audit`) now returns Pass immediately without dispatching L2/L3 LLM calls. Previously the pipeline would run expensive LLM layers on an empty diff and typically land on Inconclusive or hallucinated Fail.

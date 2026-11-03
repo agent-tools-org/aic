@@ -3,6 +3,7 @@
 
 use crate::layers::json_extract::extract_json_object;
 use anyhow::{anyhow, bail, Context, Result};
+use std::{ffi::OsString, io::Write, path::Path};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -22,10 +23,11 @@ pub struct RealAidDispatcher;
 
 impl AidDispatcher for RealAidDispatcher {
     fn dispatch(&self, agent: &str, prompt: &str) -> Result<AidResponse> {
+        let mut prompt_file = tempfile::NamedTempFile::new().context("create judge prompt file")?;
+        prompt_file.write_all(prompt.as_bytes()).context("write judge prompt")?;
+        prompt_file.flush().context("flush judge prompt")?;
         let output = Command::new("aid")
-            .arg("run")
-            .arg(agent)
-            .arg(prompt)
+            .args(run_args(agent, prompt_file.path()))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -59,6 +61,18 @@ impl AidDispatcher for RealAidDispatcher {
             duration_ms: duration.as_millis() as u64,
         })
     }
+}
+
+fn run_args(agent: &str, prompt_file: &Path) -> Vec<OsString> {
+    let mut args: Vec<OsString> = ["run", agent, "--prompt-file"]
+        .into_iter().map(OsString::from).collect();
+    args.push(prompt_file.as_os_str().to_owned());
+    args.extend([
+        "--read-only", "--no-audit", "--verify", "none",
+        "--difficulty", "simple", "--budget", "standard",
+        "--urgency", "normal", "--rigor", "standard",
+    ].into_iter().map(OsString::from));
+    args
 }
 
 pub fn parse_task_id(combined_output: &str) -> Option<String> {

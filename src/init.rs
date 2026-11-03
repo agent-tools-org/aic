@@ -8,7 +8,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const CONFIG_COMMENT: &str = "# aic audit config — see docs/architecture.md §6\n\n";
+const CONFIG_COMMENT: &str = concat!(
+    "# aic audit config — see docs/architecture.md §6\n",
+    "# layers.l2.model and layers.l3.models are aid agent names.\n\n",
+);
 const NO_UNWRAP_RULE: &str = concat!(
     "---\n",
     "id: no-unwrap-in-prod\n",
@@ -44,7 +47,7 @@ fn run_in(repo_root: &Path) -> Result<InitOutcome> {
         return handle_existing_root(&paths.aic_dir);
     }
     create_directories(&paths)?;
-    write_default_config(&paths.config_path)?;
+    write_default_config(&paths.config_path, repo_root)?;
     write_no_unwrap_rule(&paths.rule_path)?;
     fs::write(&paths.gitkeep_path, "").with_context(|| format!("write {}", paths.gitkeep_path.display()))?;
     Ok(InitOutcome::Created(paths))
@@ -64,8 +67,8 @@ fn create_directories(paths: &InitPaths) -> Result<()> {
     Ok(())
 }
 
-fn write_default_config(path: &Path) -> Result<()> {
-    let body = toml::to_string_pretty(&Config::default()).context("serialize default config")?;
+fn write_default_config(path: &Path, repo_root: &Path) -> Result<()> {
+    let body = toml::to_string_pretty(&Config::for_repo(repo_root)).context("serialize default config")?;
     fs::write(path, format!("{CONFIG_COMMENT}{body}")).with_context(|| format!("write {}", path.display()))
 }
 
@@ -173,7 +176,7 @@ mod tests {
         let repo_root = dir.path();
         run_in(repo_root).expect("init scaffold");
         let config = Config::load(&repo_root.join(".aic/config.toml")).expect("load config");
-        assert_eq!(config, Config::default());
+        assert_eq!(config, Config::for_repo(repo_root));
     }
 
     #[test]

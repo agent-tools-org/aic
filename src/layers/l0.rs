@@ -50,6 +50,16 @@ impl<'cfg> L0Runner<'cfg> {
                 }
             }
         }
+        if self.config.commands.is_empty() {
+            evidence.push(Evidence {
+                layer: Layer::L0Static,
+                signal: SignalKind::Compile,
+                passed: true,
+                detail: "no L0 commands configured — layer skipped".into(),
+                cite: Some("l0:skipped".into()),
+                cost_usd: 0.0,
+            });
+        }
         evidence
     }
 

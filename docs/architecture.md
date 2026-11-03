@@ -59,7 +59,7 @@ aid task output (diff + artifacts + event log)
  ┌────────────────────────────────────────┐
  │ L2 Checklist (cheap LLM, ~5s)          │
  │  - .aic/rules/*.md evaluated           │
- │  - single fast model (gemini-flash)    │
+ │  - configured aid agent (codex)         │
  │  - structured JSON verdict per rule    │
  └────────────────────────────────────────┘
        │ pass
@@ -144,6 +144,11 @@ All artifacts persist to `.aic/audits/<task-id>/` for later re-examination.
 
 ## 6. Config schema (`.aic/config.toml`)
 
+L2 `model` and L3 `models` are aid agent names. Omitted L0/L1 `commands` use
+Cargo defaults only when the repository root contains `Cargo.toml`; otherwise
+they skip commands. Explicit lists, including `[]`, always win. `aic init`
+writes commands for the current repository.
+
 ```toml
 [layers.l0]
 commands = ["cargo check", "cargo clippy -- -D warnings"]
@@ -156,14 +161,14 @@ max_duration_secs = 120
 
 [layers.l2]
 enabled = true
-model = "gemini-flash"
+model = "codex" # aid agent name
 rules_dir = ".aic/rules"
 
 [layers.l3]
 enabled = true
-models = ["gemini", "codex", "claude-haiku"]
+models = ["codex"] # aid agent names
 swap = true
-consensus_threshold = 2  # 2-of-3 agreement
+consensus_threshold = 1  # one agreeing agent
 
 [layers.l4]
 scripts = [".aic/checks/*.sh"]
@@ -171,7 +176,7 @@ scripts = [".aic/checks/*.sh"]
 [integration]
 aid_auto_audit = false    # opt-in per task
 aib_auto_block = true     # failing audit → blocks board item
-budget_usd_per_audit = 2.0
+budget_usd_per_audit = 5.0
 ```
 
 ## 7. Adversarial Checklist Format (`.aic/rules/*.md`)
@@ -230,7 +235,7 @@ Rules are loaded at audit time and converted into structured prompts.
 
 - **T4 — aic-004** L0 static layer runner: execute configured commands, capture stderr as `Evidence`, short-circuit logic
 - **T5 — aic-005** L1 test layer runner: project-scoped verify commands with timeout + budget
-- **T6 — aic-006** L2 checklist evaluator: load rules, build structured prompt, call LLM via `aid run gemini`, parse JSON verdict
+- **T6 — aic-006** L2 checklist evaluator: load rules, build structured prompt, call LLM via `aid run <agent>`, parse JSON verdict
 - **T7 — aic-007** L3 swap-augmented cross-LLM voter: dispatch N agents in parallel, swap positions on half, aggregate with verbosity normalization
 - **T8 — aic-008** Evidence aggregator + verdict decision logic (how layer results combine into final `Verdict`)
 
