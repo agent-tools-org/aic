@@ -56,9 +56,10 @@ impl Config {
     }
 }
 fn user_config_path() -> Option<PathBuf> {
-    std::env::var_os("XDG_CONFIG_HOME").filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+    // A relative root would read a "user" file from inside the repository under audit.
+    let absolute = |name: &str| std::env::var_os(name).map(PathBuf::from).filter(|path| path.is_absolute());
+    absolute("XDG_CONFIG_HOME")
+        .or_else(|| absolute("HOME").map(|home| home.join(".config")))
         .map(|root| root.join("aic/config.toml"))
 }
 

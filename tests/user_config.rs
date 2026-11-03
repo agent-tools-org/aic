@@ -168,3 +168,27 @@ fn invalid_user_setting_type_names_its_path() -> TestResult {
     assert!(String::from_utf8(output)?.contains(&path.display().to_string()));
     Ok(())
 }
+
+#[test]
+fn relative_config_roots_are_ignored() -> TestResult {
+    let dir = fixture()?;
+    let malformed = "invalid = [";
+    fs::create_dir_all(dir.path().join("rel/aic"))?;
+    fs::write(dir.path().join("rel/aic/config.toml"), malformed)?;
+    fs::write(dir.path().join("home/.config/aic/config.toml"), USER_CONFIG)?;
+    command(dir.path())?
+        .env("XDG_CONFIG_HOME", "rel")
+        .args(["audit", "--diff", "diff.patch"])
+        .assert()
+        .success();
+    fs::create_dir_all(dir.path().join(".config/aic"))?;
+    fs::write(dir.path().join(".config/aic/config.toml"), malformed)?;
+    fs::write(dir.path().join(".aic/config.toml"), USER_CONFIG)?;
+    command(dir.path())?
+        .env_remove("XDG_CONFIG_HOME")
+        .env("HOME", "")
+        .args(["audit", "--diff", "diff.patch"])
+        .assert()
+        .success();
+    Ok(())
+}

@@ -55,7 +55,7 @@ Verification is layered by cost and latency. Each layer can short-circuit the pi
 ## Config Reference (`.aic/config.toml`)
 
 User defaults are read from `$XDG_CONFIG_HOME/aic/config.toml`, falling back to
-`$HOME/.config/aic/config.toml` when XDG_CONFIG_HOME is unset or empty. The project
+`$HOME/.config/aic/config.toml` when XDG_CONFIG_HOME is unset, empty or relative. The project
 file (`--config`, default `.aic/config.toml`) overrides user settings key by key:
 TOML tables merge recursively, and arrays and other values are replaced whole.
 Either file may be absent; malformed files are errors naming the file.
