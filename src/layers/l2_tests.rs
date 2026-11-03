@@ -25,6 +25,18 @@ fn write_rule(dir: &Path, name: &str, severity: &str, scope: &str) {
     fs::write(dir.join(format!("{name}.md")), text).expect("write rule");
 }
 #[test]
+fn prompt_holds_the_whole_diff_so_a_late_violation_is_visible() {
+    let dir = tempdir().expect("tempdir");
+    write_rule(dir.path(), "late", "blocking", "src/**");
+    let filler = "+filler line\n".repeat(20_000);
+    let diff = format!("{filler}+LATE_VIOLATION_MARKER\n");
+    let config = config(true);
+    let dispatcher = FakeAidDispatcher::success(&[(r#"{"verdict":"pass","reason":"ok","cited_lines":[]}"#, 0.0)]);
+    let runner = L2Runner::new(&config, dir.path().to_path_buf());
+    runner.run_with(&diff, &[PathBuf::from("src/lib.rs")], &[], &dispatcher);
+    assert!(dispatcher.prompts()[0].contains("LATE_VIOLATION_MARKER"));
+}
+#[test]
 fn disabled_runner_is_noop() {
     let config = config(false); let runner = L2Runner::new(&config, PathBuf::from("missing"));
     let (result, evidence) = runner.run("diff", &[PathBuf::from("src/lib.rs")], &[]);

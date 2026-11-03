@@ -10,6 +10,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Dispatch read-only judges with whole context files and a fixed prompt that avoids aid report mode.
 - Set explicit judge task profiles and disable nested audit and verification.
 - Parse only a single JSON object in the final answer block; reject verdicts quoted in reports.
+- Give L2 the whole diff: the 8 KiB cut let a blocking rule pass on a violation past the cut.
 - Apply default Cargo checks and tests only to repositories containing Cargo.toml.
 - Add four-target release binaries with SHA-256 checksums and document binary and Git installs.
 

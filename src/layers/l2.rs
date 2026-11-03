@@ -12,7 +12,6 @@ use serde::Deserialize;
 use std::path::PathBuf;
 use std::time::Instant;
 
-const MAX_DIFF_BYTES: usize = 8 * 1024;
 const PROMPT_DELIMITERS: &[&str] = &["<DIFF_START>", "<DIFF_END>", "<CONTEXT_FILE>", "</CONTEXT_FILE>"];
 pub const MODEL_COST_USD: f64 = 0.01;
 const UNSTRUCTURED_OUTPUT_DETAIL: &str = "model returned unstructured output (tool-call payload or prose)";
@@ -134,7 +133,7 @@ fn parse_rule_evaluation(rule: &Rule, response: AidResponse) -> RuleEvaluation {
 }
 fn build_prompt(rule: &Rule, diff_text: &str, artifacts: &[PathBuf]) -> String {
     let artifact_context = render_artifact_context(artifacts, PROMPT_DELIMITERS);
-    let diff_text = sanitize_for_delimiters(truncate_bytes(diff_text, MAX_DIFF_BYTES), PROMPT_DELIMITERS);
+    let diff_text = sanitize_for_delimiters(diff_text, PROMPT_DELIMITERS);
     format!("[SYSTEM]\nYou are a code review JSON API. You respond ONLY with a single JSON object.\nYou NEVER include reasoning, explanation, preamble, postamble, or markdown fences.\nCONSTRAINT: Respond based ONLY on the content between the delimiters shown below. Do NOT read any file other than this one, list directories, run greps, or make any other tool call. Do NOT ask for more context. If the diff is insufficient for a confident verdict, return verdict=\"pass\" with reason=\"insufficient_context\" — never fail on missing context alone. This is a static analysis task on the exact diff provided, not an investigation.\nYour entire response must be a valid JSON object parseable by serde_json.\n\nRequired schema (all fields mandatory):\n{{\"verdict\":\"pass\"|\"fail\",\"reason\":\"<one sentence>\",\"cited_lines\":[\"path:line\",\"...\"]}}\n\nExample response:\n{{\"verdict\":\"pass\",\"reason\":\"no violations\",\"cited_lines\":[]}}\n\n[TASK]\nApply this rule:\n\n<RULE_START>\nRule id: {}\nRule body: {}\n<RULE_END>\n\nTo this diff:\n\n<DIFF_START>\n{}\n<DIFF_END>{}\n\n[RESPONSE]\nRespond now with ONLY the JSON object. Your entire response must begin with {{ and end with }}.", rule.id, rule.body, diff_text, artifact_context)
 }
 fn parse_response(rule: &Rule, output: &str) -> Result<ParsedVerdict, String> {
@@ -199,14 +198,6 @@ where
 {
     let reasons: Vec<&str> = evaluations.iter().filter_map(select).collect();
     (!reasons.is_empty()).then(|| reasons.join("; "))
-}
-fn truncate_bytes(text: &str, max_bytes: usize) -> &str {
-    if text.len() <= max_bytes { return text; }
-    let mut end = max_bytes;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    &text[..end]
 }
 #[cfg(test)]
 #[path = "l2_tests.rs"]
