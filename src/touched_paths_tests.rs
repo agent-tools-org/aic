@@ -20,6 +20,14 @@ fn preserves_spaces_and_ignores_trailing_tab_fields() {
 }
 
 #[test]
+fn rename_keeps_directories_named_like_diff_sides() {
+    assert_paths(
+        "diff --git a/a/old.rs b/b/new.rs\nrename from a/old.rs\nrename to b/new.rs\n",
+        &["a/old.rs", "b/new.rs"],
+    );
+}
+
+#[test]
 fn rename_and_copy_keep_both_paths_in_order() {
     assert_paths(
         "diff --git a/old.rs b/new.rs\nrename from old.rs\nrename to new.rs\n\

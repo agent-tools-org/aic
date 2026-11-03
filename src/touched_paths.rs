@@ -33,7 +33,7 @@ pub(crate) fn parse(text: &str) -> Vec<PathBuf> {
             if *old == 0 && *new == 0 {
                 hunk = None;
             }
-        } else if let Some(rest) = [
+        } else if let Some((prefix, rest)) = [
             "--- ",
             "+++ ",
             "rename from ",
@@ -42,27 +42,31 @@ pub(crate) fn parse(text: &str) -> Vec<PathBuf> {
             "copy to ",
         ]
         .iter()
-        .find_map(|prefix| line.strip_prefix(*prefix))
+        .find_map(|prefix| line.strip_prefix(*prefix).map(|rest| (*prefix, rest)))
         {
-            headers.push(decode_path(rest.split('\t').next().unwrap_or(rest)));
+            let path = decode_path(rest.split('\t').next().unwrap_or(rest));
+            // Only ---/+++ carry a side prefix; rename and copy lines hold the real path.
+            let is_side = prefix == "--- " || prefix == "+++ ";
+            headers.push(if is_side { strip_side(&path).to_owned() } else { path });
         }
     }
     flush(&mut files, &mut headers, &mut fallback);
     files
 }
 
+fn strip_side(path: &str) -> &str {
+    path.strip_prefix("a/").or_else(|| path.strip_prefix("b/")).unwrap_or(path)
+}
+
 fn flush(files: &mut Vec<PathBuf>, headers: &mut Vec<String>, fallback: &mut Vec<String>) {
-    let paths = if headers.is_empty() {
+    let from_fallback = headers.is_empty();
+    let paths = if from_fallback {
         &mut *fallback
     } else {
         &mut *headers
     };
     for path in paths.drain(..).filter(|path| path != "/dev/null") {
-        let path = path
-            .strip_prefix("a/")
-            .or_else(|| path.strip_prefix("b/"))
-            .unwrap_or(&path);
-        let path = PathBuf::from(path);
+        let path = PathBuf::from(if from_fallback { strip_side(&path) } else { &path });
         if !files.contains(&path) {
             files.push(path);
         }
