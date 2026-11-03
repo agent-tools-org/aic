@@ -31,6 +31,11 @@ The crates.io package named `aic` is a different project.
    aic audit --diff fix-bug.patch
    ```
 
+Task audits (`aic audit <task-id>`) require an aid release supporting
+`aid show <task-id> --patch`. L0 and L1 run in the current directory, so run a
+manual audit from the task’s checkout. Failure to collect a patch is a runtime
+error (exit 4); an empty patch passes without calling a judge.
+
 ### Exit Codes
 - `0`: **Pass** — All layers passed or only advisory failures.
 - `1`: **FailBlocking** — Hard failure in a critical layer or rule.

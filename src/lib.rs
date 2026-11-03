@@ -11,7 +11,6 @@ pub mod persist;
 pub mod pipeline;
 pub mod rules;
 pub mod types;
-mod task_diff;
 
 pub use cli::run;
 pub use aggregator::Aggregator;

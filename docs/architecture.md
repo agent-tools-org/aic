@@ -149,13 +149,12 @@ Cargo defaults only when the repository root contains `Cargo.toml`; otherwise
 they skip commands. Explicit lists, including `[]`, always win. `aic init`
 writes commands for the current repository.
 
-Task audits read `start_sha`, `final_head_sha`, and `worktree_path` from
-`aid show <task-id> --json`. Git runs in that worktree, or the current repository
-when no worktree is recorded. If the final SHA is absent or matches HEAD, the
-input is `git diff <start_sha>` plus untracked files; otherwise it is
-`git diff <start_sha> <final_head_sha>`, excluding later changes. Diff commands
-use `--no-ext-diff --no-color`. Missing start SHAs or checkouts and Git failures
-are runtime errors (exit 4); a genuinely empty diff remains Pass.
+Task audits require an aid release supporting `aid show <task-id> --patch`.
+The command runs in the current repository root; its stdout is saved as raw bytes
+in a temporary file kept alive through pipeline execution and removed afterwards.
+Collection failures are runtime errors (exit 4), including aid stderr and an upgrade
+hint; an empty patch remains Pass. L0 and L1 run in the current directory, so a
+manual audit must run from the task's checkout.
 
 Judge instructions and diff content are attached whole with `aid run --context`.
 The positional prompt is fixed to avoid aid report mode. Judges may read that
@@ -255,8 +254,8 @@ Rules are loaded at audit time and converted into structured prompts.
 
 ### Integration (depends on T4-T8)
 
-- **T9 — aic-009** `aic audit <task-id>` end-to-end wiring: read `aid show <task-id> --json` metadata,
-  build the Git diff, run pipeline, persist to `.aic/audits/`, emit report
+- **T9 — aic-009** `aic audit <task-id>` end-to-end wiring: collect `aid show <task-id> --patch`,
+  run pipeline, persist to `.aic/audits/`, emit report
 - **T10 — aic-010** `aid run --audit` flag + post-run hook that dispatches `aic audit`
 - **T11 — aic-011** `aib` integration: on fail, transition board item to blocked with audit report
 - **T12 — aic-012** `aic init` scaffolding + one sample rule (e.g. `no-unwrap.md`)
