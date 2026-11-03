@@ -7,7 +7,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## v0.3.0 (2026-11-03)
 
 - Use the configured aid agent for L2, defaulting to codex.
-- Dispatch read-only judges with prompt files, explicit task profiles, and audit and verification disabled.
+- Dispatch read-only judges with whole context files and a fixed prompt that avoids aid report mode.
+- Set explicit judge task profiles and disable nested audit and verification.
+- Parse only a single JSON object in the final answer block; reject verdicts quoted in reports.
 - Apply default Cargo checks and tests only to repositories containing Cargo.toml.
 - Add four-target release binaries with SHA-256 checksums and document binary and Git installs.
 

@@ -4,7 +4,8 @@
 use crate::config::L2;
 use crate::layers::aid_dispatch::{AidDispatcher, AidResponse, RealAidDispatcher};
 use crate::layers::{render_artifact_context, sanitize_for_delimiters};
-use crate::layers::json_extract::{extract_json_object, repair_partial_json, SchemaHint};
+use crate::layers::json_extract::{repair_partial_json, SchemaHint};
+use crate::layers::judge_output::judge_json;
 use crate::rules::{load_rules_dir, Rule, RuleLayer, RuleSeverity};
 use crate::types::{Evidence, Layer, LayerResult, SignalKind, Verdict};
 use serde::Deserialize;
@@ -134,10 +135,10 @@ fn parse_rule_evaluation(rule: &Rule, response: AidResponse) -> RuleEvaluation {
 fn build_prompt(rule: &Rule, diff_text: &str, artifacts: &[PathBuf]) -> String {
     let artifact_context = render_artifact_context(artifacts, PROMPT_DELIMITERS);
     let diff_text = sanitize_for_delimiters(truncate_bytes(diff_text, MAX_DIFF_BYTES), PROMPT_DELIMITERS);
-    format!("[SYSTEM]\nYou are a code review JSON API. You respond ONLY with a single JSON object.\nYou NEVER include reasoning, explanation, preamble, postamble, or markdown fences.\nCONSTRAINT: Respond based ONLY on the content between the delimiters shown below. Do NOT read files, list directories, run greps, or make any tool calls. Do NOT ask for more context. If the diff is insufficient for a confident verdict, return verdict=\"pass\" with reason=\"insufficient_context\" — never fail on missing context alone. This is a static analysis task on the exact diff provided, not an investigation.\nYour entire response must be a valid JSON object parseable by serde_json.\n\nRequired schema (all fields mandatory):\n{{\"verdict\":\"pass\"|\"fail\",\"reason\":\"<one sentence>\",\"cited_lines\":[\"path:line\",\"...\"]}}\n\nExample response:\n{{\"verdict\":\"pass\",\"reason\":\"no violations\",\"cited_lines\":[]}}\n\n[TASK]\nApply this rule:\n\n<RULE_START>\nRule id: {}\nRule body: {}\n<RULE_END>\n\nTo this diff:\n\n<DIFF_START>\n{}\n<DIFF_END>{}\n\n[RESPONSE]\nRespond now with ONLY the JSON object. Your entire response must begin with {{ and end with }}.", rule.id, rule.body, diff_text, artifact_context)
+    format!("[SYSTEM]\nYou are a code review JSON API. You respond ONLY with a single JSON object.\nYou NEVER include reasoning, explanation, preamble, postamble, or markdown fences.\nCONSTRAINT: Respond based ONLY on the content between the delimiters shown below. Do NOT read any file other than this one, list directories, run greps, or make any other tool call. Do NOT ask for more context. If the diff is insufficient for a confident verdict, return verdict=\"pass\" with reason=\"insufficient_context\" — never fail on missing context alone. This is a static analysis task on the exact diff provided, not an investigation.\nYour entire response must be a valid JSON object parseable by serde_json.\n\nRequired schema (all fields mandatory):\n{{\"verdict\":\"pass\"|\"fail\",\"reason\":\"<one sentence>\",\"cited_lines\":[\"path:line\",\"...\"]}}\n\nExample response:\n{{\"verdict\":\"pass\",\"reason\":\"no violations\",\"cited_lines\":[]}}\n\n[TASK]\nApply this rule:\n\n<RULE_START>\nRule id: {}\nRule body: {}\n<RULE_END>\n\nTo this diff:\n\n<DIFF_START>\n{}\n<DIFF_END>{}\n\n[RESPONSE]\nRespond now with ONLY the JSON object. Your entire response must begin with {{ and end with }}.", rule.id, rule.body, diff_text, artifact_context)
 }
 fn parse_response(rule: &Rule, output: &str) -> Result<ParsedVerdict, String> {
-    let json = match extract_json_object(output).map(str::to_owned).or_else(|| repair_partial_json(output, SchemaHint::L2)) {
+    let json = match judge_json(output, SchemaHint::L2) {
         Some(json) => json,
         None => return Ok(ParsedVerdict::Inconclusive(UNSTRUCTURED_OUTPUT_DETAIL.to_owned())),
     };

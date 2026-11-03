@@ -1,18 +1,24 @@
 //! Judge CLI compatibility at the subprocess boundary.
 //! Uses isolated fake aid executables and real L2/dispatcher calls.
 #![cfg(unix)]
-use aic::config::L2;
+use aic::config::{L2, L3};
 use aic::layers::aid_dispatch::{AidDispatcher, RealAidDispatcher};
-use aic::layers::l2::L2Runner;
+use aic::layers::{l2::L2Runner, l3::L3Runner};
+use aic::Verdict;
 use std::{error::Error, fs, os::unix::fs::PermissionsExt, path::Path};
 use tempfile::tempdir;
 
 const FAKE_AID: &str = r#"#!/bin/sh
+if [ "$1" = show ]; then
+    cat "$RECORD/answer"
+    exit
+fi
+[ "$1" = run ] && [ "$4" = --context ] || exit 8
 printf '%s\n' "$@" > "$RECORD/args"
-printf '%s' "$4" > "$RECORD/path"
-cat "$4" > "$RECORD/prompt" || exit 9
+printf '%s' "$5" > "$RECORD/path"
+cat "$5" > "$RECORD/prompt" || exit 9
 if [ "$FAIL_JUDGE" = 1 ]; then exit 7; fi
-printf '{"verdict":"pass","reason":"ok","cited_lines":[]}'
+printf 'Task t-abc started (judge)\nTask t-abc DONE (1s, 100 tokens, $0.01)\n'
 "#;
 
 #[test]
@@ -21,6 +27,10 @@ fn judge_process_contract() -> Result<(), Box<dyn Error>> {
         return child_calls(Path::new(&root));
     }
     let dir = tempdir()?;
+    fs::write(
+        dir.path().join("answer"),
+        r#"{"verdict":"pass","reason":"ok","cited_lines":[]}"#,
+    )?;
     let aid = dir.path().join("aid");
     fs::write(&aid, FAKE_AID)?;
     fs::set_permissions(&aid, fs::Permissions::from_mode(0o755))?;
@@ -48,7 +58,9 @@ fn child_calls(root: &Path) -> Result<(), Box<dyn Error>> {
     let path = fs::read_to_string(root.join("path"))?;
     assert!(!Path::new(&path).exists());
     let expected = format!(
-        "run\ncustom-agent\n--prompt-file\n{path}\n--read-only\n--no-audit\n--verify\nnone\n\
+        "run\ncustom-agent\n\
+         Follow the instructions in the attached context file and return only the output they specify.\n\
+         --context\n{path}\n--read-only\n--no-audit\n--verify\nnone\n\
          --difficulty\nsimple\n--budget\nstandard\n--urgency\nnormal\n--rigor\nstandard\n"
     );
     assert_eq!(fs::read_to_string(root.join("args"))?, expected);
@@ -67,6 +79,7 @@ fn child_calls(root: &Path) -> Result<(), Box<dyn Error>> {
     };
     L2Runner::new(&config, root.to_owned()).run("diff", &["src/lib.rs".into()], &[]);
     assert!(fs::read_to_string(root.join("args"))?.starts_with("run\nconfigured-agent\n"));
+    check_final_answers(root)?;
     Ok(())
 }
 
@@ -91,5 +104,61 @@ fn missing_aid_cleans_prompt_file() -> Result<(), Box<dyn Error>> {
         .assert()
         .code(3);
     assert_eq!(fs::read_dir(dir.path().join("tmp"))?.count(), 0);
+    Ok(())
+}
+
+fn check_final_answers(root: &Path) -> Result<(), Box<dyn Error>> {
+    let l2 = L2 {
+        model: "configured-agent".into(),
+        ..L2::default()
+    };
+    let l3 = L3 {
+        models: vec!["configured-agent".into()],
+        swap: false,
+        ..L3::default()
+    };
+    let pass = r#"{"verdict":"pass","reason":"No unwrap usage.","cited_lines":[]}"#;
+    let fail = r#"{"verdict":"fail","reason":"Blocking bug","bugs":["bug"],"severity":"blocking"}"#;
+    let preamble = "I'll read the full context file and keep all actions read-only.\n\n---\n\
+        [MILESTONE] Read the context and checked the diff for unwrap usage.\n\n---\n";
+    let cases = [
+        (
+            format!("## Findings\n- Blocking bug. Fixture: {pass}"),
+            "inconclusive",
+        ),
+        (format!("{preamble}{pass}"), "pass"),
+        (format!("{pass}\n---\n{preamble}{fail}"), "fail"),
+        (
+            format!("{fail}\n---\n{preamble}```json\n{pass}\n```"),
+            "pass",
+        ),
+        (format!("{pass} trailing prose"), "inconclusive"),
+        (format!("{pass}\n{fail}"), "inconclusive"),
+        (format!("{pass}\n---\nNo final JSON"), "inconclusive"),
+    ];
+    for (output, expected) in cases {
+        fs::write(root.join("answer"), &output)?;
+        let (l2_result, _) =
+            L2Runner::new(&l2, root.to_owned()).run("diff", &["src/lib.rs".into()], &[]);
+        let (l3_result, _) = L3Runner::new(&l3).run("diff", None, &[], &[]);
+        for result in [l2_result, l3_result] {
+            match expected {
+                "pass" => assert!(matches!(result.verdict, Verdict::Pass), "{output}"),
+                "fail" => assert!(
+                    matches!(result.verdict, Verdict::FailBlocking { .. }),
+                    "{output}"
+                ),
+                _ => assert!(
+                    matches!(result.verdict, Verdict::Inconclusive { .. }),
+                    "{output}"
+                ),
+            }
+        }
+        let context = fs::read_to_string(root.join("prompt"))?;
+        assert!(context.contains("Do NOT read any file other than this one"));
+        assert!(context.contains("or make any other tool call"));
+        let path = fs::read_to_string(root.join("path"))?;
+        assert!(!Path::new(&path).exists());
+    }
     Ok(())
 }

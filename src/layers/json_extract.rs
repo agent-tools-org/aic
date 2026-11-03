@@ -17,6 +17,9 @@ pub fn extract_json_object(s: &str) -> Option<&str> {
 
 pub fn repair_partial_json(raw: &str, schema_hint: SchemaHint) -> Option<String> {
     let text = strip_code_fence(raw.trim());
+    if !text.starts_with('{') {
+        return None;
+    }
     if let Some(json) = extract_json_object(text) {
         if let Some(repaired) = repair_extracted_object(json, schema_hint) {
             return Some(repaired);
@@ -25,7 +28,7 @@ pub fn repair_partial_json(raw: &str, schema_hint: SchemaHint) -> Option<String>
     if let Some(violated_rules) = extract_violated_rules(text) {
         return Some(synthesize_partial(text, schema_hint, violated_rules));
     }
-    looks_like_audit_prose(text).then(|| synthesize_partial(text, schema_hint, Vec::new()))
+    None
 }
 
 fn strip_code_fence(s: &str) -> &str {
@@ -109,17 +112,6 @@ fn extract_violated_rules(text: &str) -> Option<Vec<String>> {
         .filter(|item| !item.is_empty())
         .collect();
     (!items.is_empty()).then_some(items)
-}
-
-fn looks_like_audit_prose(text: &str) -> bool {
-    const HINTS: &[&str] = &[
-        "I will begin by investigating",
-        "Reviewing the diff",
-        "I'll review",
-        "I’ll review",
-        "write the audit result",
-    ];
-    HINTS.iter().any(|hint| text.contains(hint))
 }
 
 fn synthesize_partial(raw: &str, schema_hint: SchemaHint, violated_rules: Vec<String>) -> String {
@@ -241,32 +233,21 @@ mod tests {
     }
 
     #[test]
-    fn repairs_real_failure_with_rule_suffix_for_l3() {
+    fn rejects_real_failure_with_rule_suffix_for_l3() {
         let raw = "Reviewing the diff for behavioral regressions and checking the surrounding WooFi cache logic before I decide whether this change is safe.\nviolated_rules=[cached-timestamp-freshness, comment-behavior-parity]";
-        let repaired = repair_partial_json(raw, SchemaHint::L3).expect("repair");
-        let parsed: L3Response = serde_json::from_str(&repaired).expect("parse");
-        assert_eq!(parsed.verdict, "fail");
-        assert_eq!(parsed.severity, "advisory");
-        assert_eq!(parsed.violated_rules, vec!["cached-timestamp-freshness", "comment-behavior-parity"]);
+        assert_eq!(repair_partial_json(raw, SchemaHint::L3), None);
     }
 
     #[test]
-    fn repairs_real_failure_investigation_preamble_for_l3() {
+    fn rejects_real_failure_investigation_preamble_for_l3() {
         let raw = "I will begin by investigating the `crates/sr-pc-exotic/src/woofi_cache.rs` file to understand the context of the `is_oracle_fresh` function, specifically how `now` and `FRESHNESS_MARGIN` are defined.";
-        let repaired = repair_partial_json(raw, SchemaHint::L3).expect("repair");
-        let parsed: L3Response = serde_json::from_str(&repaired).expect("parse");
-        assert_eq!(parsed.verdict, "fail");
-        assert_eq!(parsed.severity, "advisory");
-        assert!(parsed.bugs[0].contains("partial:"));
+        assert_eq!(repair_partial_json(raw, SchemaHint::L3), None);
     }
 
     #[test]
-    fn repairs_real_failure_result_file_preamble_for_l3() {
+    fn rejects_real_failure_result_file_preamble_for_l3() {
         let raw = "I’ll review the WooFi oracle freshness change against the surrounding implementation and on-chain semantics implied by the code, then write the audit result to `result-t-b809.md`.";
-        let repaired = repair_partial_json(raw, SchemaHint::L3).expect("repair");
-        let parsed: L3Response = serde_json::from_str(&repaired).expect("parse");
-        assert_eq!(parsed.verdict, "fail");
-        assert!(parsed.bugs[0].contains("partial:"));
+        assert_eq!(repair_partial_json(raw, SchemaHint::L3), None);
     }
 
     #[test]
@@ -278,12 +259,9 @@ mod tests {
     }
 
     #[test]
-    fn repairs_preamble_then_json() {
+    fn rejects_preamble_then_json() {
         let raw = "Sure, here is the result: {\"verdict\":\"fail\",\"bugs\":[],\"severity\":\"blocking\",\"violated_rules\":[]}";
-        let repaired = repair_partial_json(raw, SchemaHint::L3).expect("repair");
-        let parsed: L3Response = serde_json::from_str(&repaired).expect("parse");
-        assert_eq!(parsed.verdict, "fail");
-        assert_eq!(parsed.severity, "blocking");
+        assert_eq!(repair_partial_json(raw, SchemaHint::L3), None);
     }
 
     #[test]
@@ -291,6 +269,8 @@ mod tests {
         let parsed: L3Response = serde_json::from_str(&repair_partial_json("{\"violated_rules\":[\"r1\",\"r2\"]}", SchemaHint::L3).expect("repair")).expect("parse");
         assert_eq!(parsed.verdict, "fail");
         assert_eq!(parsed.violated_rules, vec!["r1", "r2"]);
+        assert_eq!(parsed.severity, "advisory");
+        assert!(parsed.bugs[0].contains("partial:"));
     }
 
     #[test]

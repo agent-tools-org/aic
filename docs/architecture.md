@@ -149,6 +149,12 @@ Cargo defaults only when the repository root contains `Cargo.toml`; otherwise
 they skip commands. Explicit lists, including `[]`, always win. `aic init`
 writes commands for the current repository.
 
+Judge instructions and diff content are attached whole with `aid run --context`.
+The positional prompt is fixed to avoid aid report mode. Judges may read that
+context file only. Verdicts come from a single JSON object in the final answer
+block after the last `---` line, optionally wrapped in a code fence. Prose and
+quoted JSON fixtures cannot supply a verdict.
+
 ```toml
 [layers.l0]
 commands = ["cargo check", "cargo clippy -- -D warnings"]

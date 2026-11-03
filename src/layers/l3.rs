@@ -3,7 +3,8 @@
 use crate::config::L3;
 use crate::layers::aid_dispatch::{AidDispatcher, AidResponse, RealAidDispatcher};
 use crate::layers::{render_artifact_context, sanitize_for_delimiters};
-use crate::layers::json_extract::{extract_json_object, repair_partial_json, SchemaHint};
+use crate::layers::json_extract::{repair_partial_json, SchemaHint};
+use crate::layers::judge_output::judge_json;
 use crate::rules::Rule;
 use crate::types::{Evidence, Layer, LayerResult, SignalKind, Verdict};
 use serde::Deserialize;
@@ -13,7 +14,7 @@ use std::time::Instant;
 const PROMPT_DELIMITERS: &[&str] = &["<DIFF_START>", "<DIFF_END>", "<CONTEXT_FILE>", "</CONTEXT_FILE>", "<SPEC_START>", "<SPEC_END>"];
 pub const MODEL_COST_USD: f64 = 0.05;
 const MAX_BUGS: usize = 3;
-const RETRY_SYSTEM_PROMPT: &str = "CRITICAL: Your previous response contained no JSON object. You MUST respond with ONLY a JSON object matching this schema: {verdict, bugs, severity, violated_rules}. Start with { and end with }. No reasoning, no preamble, no tool calls. This is a structured-output API, not an interactive chat.";
+const RETRY_SYSTEM_PROMPT: &str = "CRITICAL: Your previous response contained no JSON object. You MUST respond with ONLY a JSON object matching this schema: {verdict, bugs, severity, violated_rules}. Start with { and end with }. No reasoning or preamble. Read only this context file and make no other tool call. This is a structured-output API, not an interactive chat.";
 const UNSTRUCTURED_OUTPUT_DETAIL: &str = "model returned unstructured output (tool-call payload or prose)";
 pub struct L3Runner<'cfg> { pub config: &'cfg L3 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,13 +89,13 @@ fn dispatch_review<D>(dispatcher: &D, model: &str, prompt: &str) -> CallOutcome 
 }
 
 fn parse_output(output: &str) -> ParseStatus {
-    if let Some(json) = extract_json_object(output) {
-        return match serde_json::from_str::<ReviewResponse>(json).map(normalize_response) {
+    if let Some(json) = judge_json(output, SchemaHint::L3) {
+        return match serde_json::from_str::<ReviewResponse>(&json).map(normalize_response) {
             Ok(review) => ParseStatus::Parsed(review),
-            Err(_) => repair_review(output).unwrap_or_else(|| ParseStatus::Inconclusive(UNSTRUCTURED_OUTPUT_DETAIL.to_owned())),
+            Err(_) => repair_review(&json).unwrap_or_else(|| ParseStatus::Inconclusive(UNSTRUCTURED_OUTPUT_DETAIL.to_owned())),
         };
     }
-    repair_review(output).unwrap_or_else(|| ParseStatus::Inconclusive(UNSTRUCTURED_OUTPUT_DETAIL.to_owned()))
+    ParseStatus::Inconclusive(UNSTRUCTURED_OUTPUT_DETAIL.to_owned())
 }
 fn normalize_response(mut response: ReviewResponse) -> ReviewResponse {
     response.bugs.truncate(MAX_BUGS);
@@ -156,7 +157,7 @@ fn build_prompt(diff_text: &str, spec: Option<&str>, artifacts: &[PathBuf], rule
         format!("## Diff\n<DIFF_START>\n{diff_text}\n<DIFF_END>{artifacts}\n\n## Spec\n<SPEC_START>\n{spec_text}\n<SPEC_END>")
     };
     format!(
-        "[SYSTEM]\nYou are a code review JSON API. You respond ONLY with a single JSON object.\nYou NEVER include reasoning, explanation, preamble, postamble, or markdown fences.\nCONSTRAINT: Respond based ONLY on the content between the delimiters shown below. Do NOT read files, list directories, run greps, or make any tool calls. Do NOT ask for more context. If the diff is insufficient for a confident verdict, return verdict=\"pass\" with reason=\"insufficient_context\" — never fail on missing context alone. This is a static analysis task on the exact diff provided, not an investigation.\nYour entire response must be a valid JSON object parseable by serde_json.\n\nRequired schema (all fields mandatory):\n{{\"verdict\":\"pass\"|\"fail\",\"bugs\":[\"<one-line description>\",\"...\"],\"severity\":\"blocking\"|\"advisory\",\"violated_rules\":[\"id\",\"...\"]}}\n\nExample response:\n{{\"verdict\":\"pass\",\"bugs\":[],\"severity\":\"advisory\",\"violated_rules\":[]}}\n\n[TASK]\n{task}{rules_section}\n\n{ordered_sections}\n\n[RESPONSE]\nRespond now with ONLY the JSON object. Your entire response must begin with {{ and end with }}.",
+        "[SYSTEM]\nYou are a code review JSON API. You respond ONLY with a single JSON object.\nYou NEVER include reasoning, explanation, preamble, postamble, or markdown fences.\nCONSTRAINT: Respond based ONLY on the content between the delimiters shown below. Do NOT read any file other than this one, list directories, run greps, or make any other tool call. Do NOT ask for more context. If the diff is insufficient for a confident verdict, return verdict=\"pass\" with reason=\"insufficient_context\" — never fail on missing context alone. This is a static analysis task on the exact diff provided, not an investigation.\nYour entire response must be a valid JSON object parseable by serde_json.\n\nRequired schema (all fields mandatory):\n{{\"verdict\":\"pass\"|\"fail\",\"bugs\":[\"<one-line description>\",\"...\"],\"severity\":\"blocking\"|\"advisory\",\"violated_rules\":[\"id\",\"...\"]}}\n\nExample response:\n{{\"verdict\":\"pass\",\"bugs\":[],\"severity\":\"advisory\",\"violated_rules\":[]}}\n\n[TASK]\n{task}{rules_section}\n\n{ordered_sections}\n\n[RESPONSE]\nRespond now with ONLY the JSON object. Your entire response must begin with {{ and end with }}.",
         task = task,
         rules_section = rules_text.map(|text| format!("\n\n## Rules to enforce\n{text}")).unwrap_or_default(),
     )
@@ -238,10 +239,11 @@ mod tests {
         assert!(prompt.contains("<RULE_START>")); assert!(prompt.contains(&rule.body));
     }
     #[test]
-    fn parse_output_extracts_json_from_preamble() {
+    fn parse_output_rejects_json_embedded_in_prose() {
         let dispatcher = FakeDispatcher::new(&[("Sure, here is the result: {\"verdict\":\"fail\",\"bugs\":[],\"severity\":\"blocking\",\"violated_rules\":[]}", 0.0)]);
         let outcome = dispatch_review(&dispatcher, "gemini", "prompt");
-        assert_eq!(outcome.vote, VoteKind::FailBlocking); assert!(outcome.evidence.detail.contains("Sure, here is the result")); assert!(outcome.evidence.detail.contains("retry=0"));
+        assert_eq!(outcome.vote, VoteKind::Inconclusive);
+        assert_eq!(outcome.evidence.detail, UNSTRUCTURED_OUTPUT_DETAIL);
         assert!((outcome.evidence.cost_usd - MODEL_COST_USD).abs() < f64::EPSILON);
     }
     #[test]
@@ -278,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_forbids_file_reads() {
-        assert!(build_prompt("diff", Some("spec"), &[], &[&sample_rule()], false).contains("Do NOT read files"));
+    fn prompt_limits_reads_to_context() {
+        assert!(build_prompt("diff", Some("spec"), &[], &[&sample_rule()], false).contains("Do NOT read any file other than this one"));
     }
 }

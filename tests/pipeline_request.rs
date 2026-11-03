@@ -175,7 +175,7 @@ fn install_fake_aid_with_logging(dir: &Path, log_path: &Path) -> Result<PathGuar
         &format!(
             concat!(
                 "#!/bin/sh\n",
-                "cat \"$4\" >> \"{}\" || exit 1\n",
+                "cat \"$5\" >> \"{}\" || exit 1\n",
                 "printf '\\n--PROMPT--\\n' >> \"{}\"\n",
                 "printf '%s\\n' '{{\"verdict\":\"pass\",\"reason\":\"ok\",",
                 "\"cited_lines\":[],\"bugs\":[],\"severity\":\"advisory\"}}'\n",

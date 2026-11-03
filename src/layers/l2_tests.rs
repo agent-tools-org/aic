@@ -85,7 +85,7 @@ fn prompt_includes_artifacts_and_sanitizes_diff_delimiters() {
     assert!(prompt.contains("<CONTEXT_FILE path='")); assert!(prompt.contains("artifact <CONTEXT-FILE> body"));
 }
 #[test]
-fn prompt_forbids_file_reads() {
+fn prompt_limits_reads_to_context() {
     let prompt = build_prompt(&Rule { id: "rule".into(), severity: RuleSeverity::Advisory, scope: vec!["src/**/*.rs".into()], layer: RuleLayer::L2, title: "Rule".into(), body: "Body".into(), source_path: PathBuf::from("rule.md") }, "diff", &[]);
-    assert!(prompt.contains("Do NOT read files"));
+    assert!(prompt.contains("Do NOT read any file other than this one"));
 }

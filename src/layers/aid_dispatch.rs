@@ -21,6 +21,10 @@ pub trait AidDispatcher {
 
 pub struct RealAidDispatcher;
 
+// Keep aid report-mode terms out of this prompt: they override the context's JSON instructions.
+const FIXED_PROMPT: &str =
+    "Follow the instructions in the attached context file and return only the output they specify.";
+
 impl AidDispatcher for RealAidDispatcher {
     fn dispatch(&self, agent: &str, prompt: &str) -> Result<AidResponse> {
         let mut prompt_file = tempfile::NamedTempFile::new().context("create judge prompt file")?;
@@ -64,7 +68,7 @@ impl AidDispatcher for RealAidDispatcher {
 }
 
 fn run_args(agent: &str, prompt_file: &Path) -> Vec<OsString> {
-    let mut args: Vec<OsString> = ["run", agent, "--prompt-file"]
+    let mut args: Vec<OsString> = ["run", agent, FIXED_PROMPT, "--context"]
         .into_iter().map(OsString::from).collect();
     args.push(prompt_file.as_os_str().to_owned());
     args.extend([
@@ -155,6 +159,14 @@ fn is_task_id(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fixed_prompt_avoids_report_mode_terms() {
+        let prompt = FIXED_PROMPT.to_lowercase();
+        for term in ["review", "audit", "findings", "pass/fail", "severity", "evidence", "open questions"] {
+            assert!(!prompt.contains(term), "report-mode term: {term}");
+        }
+    }
 
     #[test]
     fn parse_task_id_reads_started_line_from_combined_output() {
