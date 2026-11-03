@@ -65,6 +65,7 @@ fn init_writes_commands_for_each_repository_kind() -> Result<(), Box<dyn Error>>
         }
         Command::cargo_bin("aic")?
             .current_dir(dir.path())
+            .env("XDG_CONFIG_HOME", dir.path().join("isolated-config"))
             .arg("init")
             .assert()
             .success();

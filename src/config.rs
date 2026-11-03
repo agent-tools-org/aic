@@ -3,7 +3,11 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::{fs, io::ErrorKind, path::Path};
+use std::{
+    fs,
+    io::ErrorKind,
+    path::{Path, PathBuf},
+};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
@@ -26,21 +30,20 @@ impl Config {
     }
 
     pub fn load_for_repo(path: &Path, repo_root: &Path) -> Result<Self> {
-        let contents = match fs::read_to_string(path) {
-            Ok(contents) => contents,
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Self::for_repo(repo_root)),
-            Err(error) => return Err(error).with_context(|| format!("read {}", path.display())),
+        let mut value = match user_config_path() {
+            Some(user_path) => read_config(&user_path)?,
+            None => toml::Value::Table(Default::default()),
         };
-        let value: toml::Value = toml::from_str(&contents)
-            .with_context(|| format!("parse {}", path.display()))?;
+        merge_tables(&mut value, read_config(path)?);
         let has_commands = |layer: &str| {
             value.get("layers").and_then(|layers| layers.get(layer))
                 .and_then(|settings| settings.get("commands")).is_some()
         };
         let l0_explicit = has_commands("l0");
         let l1_explicit = has_commands("l1");
-        let mut config: Self = value.try_into()
-            .with_context(|| format!("parse {}", path.display()))?;
+        let mut config: Self = value.try_into().with_context(|| {
+            format!("deserialize merged config for {} (user file: {:?})", path.display(), user_config_path())
+        })?;
         if !repo_root.join("Cargo.toml").is_file() {
             if !l0_explicit {
                 config.layers.l0.commands.clear();
@@ -52,6 +55,42 @@ impl Config {
         Ok(config)
     }
 }
+fn user_config_path() -> Option<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME").filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+        .map(|root| root.join("aic/config.toml"))
+}
+
+fn read_config(path: &Path) -> Result<toml::Value> {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Ok(toml::Value::Table(Default::default()));
+        }
+        Err(error) => return Err(error).with_context(|| format!("read {}", path.display())),
+    };
+    let table: toml::Table = toml::from_str(&contents)
+        .with_context(|| format!("parse {}", path.display()))?;
+    Ok(toml::Value::Table(table))
+}
+
+fn merge_tables(base: &mut toml::Value, project: toml::Value) {
+    match (base, project) {
+        (toml::Value::Table(base), toml::Value::Table(project)) => {
+            for (key, value) in project {
+                match base.get_mut(&key) {
+                    Some(existing) => merge_tables(existing, value),
+                    None => {
+                        base.insert(key, value);
+                    }
+                }
+            }
+        }
+        (base, project) => *base = project,
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct Layers {

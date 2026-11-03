@@ -5,7 +5,10 @@ use assert_cmd::Command;
 use std::error::Error;
 
 fn stdout_for(args: &[&str]) -> Result<String, Box<dyn Error>> {
-    let output = Command::cargo_bin("aic")?.args(args).output()?;
+    let config_home = tempfile::tempdir()?;
+    let output = Command::cargo_bin("aic")?
+        .env("XDG_CONFIG_HOME", config_home.path())
+        .args(args).output()?;
     assert!(output.status.success());
     Ok(String::from_utf8(output.stdout)?)
 }

@@ -27,6 +27,7 @@ fn fail_blocking_l0_prevents_later_layers_from_running() -> Result<(), Box<dyn E
 
     let output = Command::cargo_bin("aic")?
         .current_dir(dir.path())
+        .env("XDG_CONFIG_HOME", dir.path().join("isolated-config"))
         .args(["audit", "--diff", "diff.patch"])
         .output()?;
 

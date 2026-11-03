@@ -98,6 +98,7 @@ fn missing_aid_cleans_prompt_file() -> Result<(), Box<dyn Error>> {
     )?;
     assert_cmd::Command::cargo_bin("aic")?
         .current_dir(dir.path())
+        .env("XDG_CONFIG_HOME", dir.path().join("isolated-config"))
         .env("PATH", dir.path())
         .env("TMPDIR", dir.path().join("tmp"))
         .args(["audit", "--diff", "diff.patch"])
@@ -174,6 +175,7 @@ fn oversized_diff_is_inconclusive_without_calling_a_judge() -> Result<(), Box<dy
     let path = format!("{}:{}", dir.path().display(), std::env::var("PATH")?);
     let output = assert_cmd::Command::cargo_bin("aic")?
         .current_dir(dir.path())
+        .env("XDG_CONFIG_HOME", dir.path().join("isolated-config"))
         .env("PATH", path)
         .env("RECORD", dir.path())
         .args(["audit", "--diff", "big.patch"])

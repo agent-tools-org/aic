@@ -22,6 +22,7 @@ fn audit_diff_persists_result_json() -> Result<(), Box<dyn Error>> {
 
     let output = Command::cargo_bin("aic")?
         .current_dir(dir.path())
+        .env("XDG_CONFIG_HOME", dir.path().join("isolated-config"))
         .args(["audit", "--diff", "diff.patch"])
         .output()?;
 
@@ -62,6 +63,7 @@ fn audit_diff_with_board_item_invokes_ai_board() -> Result<(), Box<dyn Error>> {
     let path = format!("{}:{}", bin_dir.display(), std::env::var("PATH")?);
     let output = Command::cargo_bin("aic")?
         .current_dir(dir.path())
+        .env("XDG_CONFIG_HOME", dir.path().join("isolated-config"))
         .env("PATH", path)
         .args(["audit", "--diff", "diff.patch", "--board-item", "wi-fake"])
         .output()?;

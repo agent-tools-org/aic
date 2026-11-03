@@ -36,6 +36,9 @@ The crates.io package named `aic` is a different project.
 - `1`: **FailBlocking** — Hard failure in a critical layer or rule.
 - `2`: **FailAdvisory** — Non-blocking warning detected.
 - `3`: **Inconclusive** — Pipeline could not reach a verdict (e.g., budget exceeded).
+- `4`: **Runtime error** — An error prevented completion; details are printed to stderr.
+
+Clap usage errors retain their own exit codes.
 
 ## The 5 Layers
 
@@ -51,10 +54,18 @@ Verification is layered by cost and latency. Each layer can short-circuit the pi
 
 ## Config Reference (`.aic/config.toml`)
 
-L2 `model` and L3 `models` are aid agent names. Omitted L0/L1 `commands` use
+User defaults are read from `$XDG_CONFIG_HOME/aic/config.toml`, falling back to
+`$HOME/.config/aic/config.toml` when XDG_CONFIG_HOME is unset or empty. The project
+file (`--config`, default `.aic/config.toml`) overrides user settings key by key:
+TOML tables merge recursively, and arrays and other values are replaced whole.
+Either file may be absent; malformed files are errors naming the file.
+`aic init` ignores user settings and writes defaults for the current repository.
+
+L2 `model` and L3 `models` are aid agent names. L0/L1 `commands` omitted from the merged config use
 Cargo defaults only when the repository root contains `Cargo.toml`; otherwise
 they skip commands. Explicit lists, including `[]`, always win. `aic init`
-writes commands for the current repository.
+writes commands for the current repository. A user-level `commands = []` disables
+that layer’s commands even in Rust repositories unless the project overrides it.
 
 ```toml
 [layers.l0]
