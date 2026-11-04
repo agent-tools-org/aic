@@ -1,6 +1,7 @@
 //! Library surface for the aic audit CLI scaffold.
 //! Exports: CLI runner and public modules; deps: cli, config, types.
 
+mod base_config;
 pub mod cli;
 pub mod aib;
 pub mod aggregator;

@@ -23,18 +23,25 @@ pub fn run() -> Result<()> {
     match cli.command {
         Commands::Init => init::run()?,
         Commands::Audit(args) => {
-            let config = Config::load(&cli.config)?;
-            run_audit(args, &config)?;
+            run_audit(args, cli.config.as_deref())?;
         }
         command => println!("not yet implemented: {}", command.stub_name()),
     }
     Ok(())
 }
 
-fn run_audit(args: AuditArgs, config: &Config) -> Result<()> {
+fn run_audit(args: AuditArgs, explicit_config: Option<&Path>) -> Result<()> {
     let repo_root = std::env::current_dir().context("resolve current directory")?;
+    let task_mode = args.task_id.is_some();
     let board_item = args.board_item.clone();
     let (task_id, diff_path, task_diff) = audit_target(args, &repo_root)?;
+    let base = if explicit_config.is_none() {
+        task_mode.then(|| crate::base_config::BaseConfig::load(&task_id, &repo_root)).transpose()?
+    } else { None };
+    let config = match &base {
+        Some(base) => base.config.clone(),
+        None => Config::load(explicit_config.unwrap_or(Path::new(".aic/config.toml")))?,
+    };
     let request = AuditRequest {
         task_id: Some(task_id.clone()),
         diff_path,
@@ -43,7 +50,7 @@ fn run_audit(args: AuditArgs, config: &Config) -> Result<()> {
         skip_layers: Vec::new(),
         budget_usd: Some(config.integration.budget_usd_per_audit),
     };
-    let result = Pipeline::new(config, repo_root.clone()).execute(request)?;
+    let result = Pipeline::new(&config, repo_root.clone()).execute(request)?;
     drop(task_diff);
     let audit_dir = persist_audit(&task_id, &result, &repo_root)?;
     println!("{}", render_markdown_report(&result));
@@ -131,7 +138,8 @@ fn init_tracing(verbose: bool) -> Result<()> {
 #[derive(Debug, Parser)]
 #[command(name = "aic", version, about = "Cross-audit aid agent outputs")]
 struct Cli {
-    #[arg(long, default_value = ".aic/config.toml", value_name = "path")] config: PathBuf,
+    /// Explicit config override; task audits otherwise load .aic/config.toml from the patch base.
+    #[arg(long, value_name = "path")] config: Option<PathBuf>,
     #[arg(short, long)] verbose: bool,
     #[command(subcommand)] command: Commands,
 }
