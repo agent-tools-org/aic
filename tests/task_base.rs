@@ -105,6 +105,7 @@ fn explicit_config_uses_checkout_without_base_lookup() -> TestResult {
     command
         .current_dir(&fixture.repo)
         .env("XDG_CONFIG_HOME", fixture.root.path().join("config"))
+        .env("TMPDIR", fixture.root.path().join("tmp"))
         .env("RECORD", fixture.root.path())
         .env(
             "PATH",
