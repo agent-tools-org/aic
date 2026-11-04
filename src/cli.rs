@@ -52,6 +52,7 @@ fn run_audit(args: AuditArgs, explicit_config: Option<&Path>) -> Result<()> {
     };
     let result = Pipeline::new(&config, repo_root.clone()).execute(request)?;
     drop(task_diff);
+    drop(base);
     let audit_dir = persist_audit(&task_id, &result, &repo_root)?;
     println!("{}", render_markdown_report(&result));
     if config.integration.aib_auto_block {

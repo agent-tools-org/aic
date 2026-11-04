@@ -67,10 +67,12 @@ Either file may be absent; malformed files are errors naming the file.
 `aic init` ignores user settings and writes defaults for the current repository.
 
 Task audits load `.aic/config.toml`, rules (including relative rule paths outside `.aic/`),
-and Cargo default detection from the commit returned by `aid show <task-id> --patch-base`.
+and Cargo default detection from the first attempt's recorded start commit returned by
+`aid show <task-id> --start-commit`.
 Missing base config uses user config and defaults; checkout additions apply to later tasks.
-Base lookup errors fail with exit 4 and require an aid version supporting `--patch-base`.
-Rule paths escaping the repository and symlink rule paths are rejected.
+Base lookup errors fail with exit 4 and require an aid version supporting `--start-commit`.
+Relative rule paths escaping the repository are rejected. Absolute user-config rule paths
+remain external; project-config rule paths must be relative to the repository.
 Commands still execute in the working tree, and reports are written to `.aic/audits/` there.
 `layers.l4.scripts` is currently unused. L0/L1 command strings execute as shell commands.
 An explicit top-level `--config <path>` uses the caller's file and checkout paths instead;

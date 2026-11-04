@@ -1,4 +1,4 @@
-//! Task configuration pinned to aid's patch base, independent of checkout changes.
+//! Task configuration pinned to aid's recorded start commit, independent of checkout changes.
 //! Materializes config and rule blobs with sanitized git commands; owns their temporary lifetime.
 
 use crate::config::Config;
@@ -11,7 +11,7 @@ use std::{
 use tempfile::TempDir;
 
 const HINT: &str =
-    "requires a newer aid with `aid show --patch-base` support and a readable base commit";
+    "requires a newer aid with `aid show --start-commit` support and a readable base commit";
 
 pub struct BaseConfig {
     pub config: Config,
@@ -31,20 +31,20 @@ impl BaseConfig {
 
     fn load_inner(task: &str, repo: &Path) -> Result<Self> {
         let output = Command::new("aid")
-            .args(["show", task, "--patch-base"])
+            .args(["show", task, "--start-commit"])
             .current_dir(repo)
             .output()
-            .context("run aid show --patch-base")?;
+            .context("run aid show --start-commit")?;
         if !output.status.success() {
             bail!(
-                "aid show --patch-base failed: {}",
+                "aid show --start-commit failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        let text = std::str::from_utf8(&output.stdout).context("patch base is not UTF-8")?;
+        let text = std::str::from_utf8(&output.stdout).context("start commit is not UTF-8")?;
         let base = text.strip_suffix('\n').unwrap_or(text);
         if !matches!(base.len(), 40 | 64) || !base.bytes().all(|b| b.is_ascii_hexdigit()) {
-            bail!("aid show --patch-base returned an invalid full hex commit id");
+            bail!("aid show --start-commit returned an invalid full hex commit id");
         }
         git(repo, &["cat-file", "-e", &format!("{base}^{{commit}}")])?;
         let snapshot = tempfile::tempdir().context("create base config snapshot")?;
@@ -52,14 +52,35 @@ impl BaseConfig {
         materialize(repo, base, Path::new("Cargo.toml"), snapshot.path())?;
         let mut config =
             Config::load_for_repo(&snapshot.path().join(".aic/config.toml"), snapshot.path())?;
-        let rules = relative_path(&config.layers.l2.rules_dir)?;
-        materialize(repo, base, &rules, snapshot.path())?;
-        config.layers.l2.rules_dir = snapshot.path().join(rules).to_string_lossy().into_owned();
+        if !Path::new(&config.layers.l2.rules_dir).is_absolute() {
+            let rules = relative_path(&config.layers.l2.rules_dir)?;
+            materialize(repo, base, &rules, snapshot.path())?;
+            config.layers.l2.rules_dir = snapshot.path().join(rules).to_string_lossy().into_owned();
+        } else {
+            reject_project_absolute_rules(snapshot.path())?;
+        }
         Ok(Self {
             config,
             _snapshot: snapshot,
         })
     }
+}
+
+fn reject_project_absolute_rules(snapshot: &Path) -> Result<()> {
+    let path = snapshot.join(".aic/config.toml");
+    if !path.exists() {
+        return Ok(());
+    }
+    let project: toml::Value = toml::from_str(&fs::read_to_string(path)?)?;
+    if project
+        .get("layers")
+        .and_then(|v| v.get("l2"))
+        .and_then(|v| v.get("rules_dir"))
+        .is_some()
+    {
+        bail!("project rules_dir must be relative to the repository");
+    }
+    Ok(())
 }
 
 fn relative_path(value: &str) -> Result<PathBuf> {
@@ -77,7 +98,8 @@ fn relative_path(value: &str) -> Result<PathBuf> {
 
 fn materialize(repo: &Path, base: &str, path: &Path, dest: &Path) -> Result<()> {
     let name = path.to_str().context("non UTF-8 config path")?;
-    let listing = git(repo, &["ls-tree", "-rz", base])?;
+    reject_symlink_ancestors(repo, base, path)?;
+    let listing = git(repo, &["ls-tree", "-rz", base, "--", name])?;
     for entry in listing.split(|b| *b == 0).filter(|entry| !entry.is_empty()) {
         let entry = std::str::from_utf8(entry).context("non UTF-8 base tree path")?;
         let (metadata, file) = entry.split_once('\t').context("invalid git tree entry")?;
@@ -97,6 +119,21 @@ fn materialize(repo: &Path, base: &str, path: &Path, dest: &Path) -> Result<()> 
             .nth(2)
             .context("missing git blob id")?;
         fs::write(target, git(repo, &["cat-file", "blob", oid])?)?;
+    }
+    Ok(())
+}
+
+fn reject_symlink_ancestors(repo: &Path, base: &str, path: &Path) -> Result<()> {
+    for ancestor in path
+        .ancestors()
+        .skip(1)
+        .filter(|p| !p.as_os_str().is_empty())
+    {
+        let name = ancestor.to_str().context("non UTF-8 config ancestor")?;
+        let entry = git(repo, &["ls-tree", "-z", base, "--", name])?;
+        if entry.starts_with(b"120000 ") || entry.starts_with(b"160000 ") {
+            bail!("base config path traverses a non-directory: {name}");
+        }
     }
     Ok(())
 }

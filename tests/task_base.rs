@@ -16,6 +16,7 @@ fn task_cannot_disable_base_l2_or_weaken_rule() -> TestResult {
     )?;
     fs::write(fixture.repo.join(".aic/rules/check.md"), "weakened")?;
     fixture.audit("t-task")?.assert().code(1);
+    fixture.assert_temp_removed()?;
     assert!(fs::read_to_string(fixture.root.path().join("context"))?.contains("Check the diff."));
     Ok(())
 }
@@ -151,4 +152,65 @@ fn deleted_cargo_manifest_still_selects_cargo_defaults() -> TestResult {
         .clone();
     assert!(String::from_utf8(output)?.contains("cargo-default"));
     Ok(())
+}
+
+#[test]
+fn config_uses_recorded_start_even_when_patch_is_against_an_older_commit() -> TestResult {
+    let fixture = Fixture::new()?;
+    let path = fixture.repo.join(".aic/config.toml");
+    let enabled = fs::read_to_string(&path)?;
+    fs::write(&path, enabled.replace("enabled=true", "enabled=false"))?;
+    fixture.commit()?;
+    let older = fs::read_to_string(fixture.root.path().join("base"))?;
+    fs::write(&path, &enabled)?;
+    fs::create_dir_all(fixture.repo.join("src"))?;
+    fs::write(fixture.repo.join("src/task.rs"), "start-line\n")?;
+    fixture.commit()?;
+    fs::write(fixture.repo.join("src/task.rs"), "delivered-line\n")?;
+    let patch = std::process::Command::new("git")
+        .args(["diff", older.trim()])
+        .current_dir(&fixture.repo)
+        .output()?;
+    assert!(patch.status.success());
+    fs::write(fixture.root.path().join("patch"), patch.stdout)?;
+    fs::write(&path, enabled.replace("enabled=true", "enabled=false"))?;
+    fixture.audit("t-task")?.assert().code(1);
+    assert!(fs::read_to_string(fixture.root.path().join("context"))?.contains("Check the diff."));
+    fixture.assert_temp_removed()
+}
+
+#[test]
+fn unrelated_non_utf8_base_filename_does_not_break_audit() -> TestResult {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+    let fixture = Fixture::new()?;
+    let name = OsString::from_vec(vec![b'u', 0xff]);
+    fs::write(fixture.repo.join(name), "unrelated")?;
+    fixture.commit()?;
+    fixture.audit("t-task")?.assert().code(1);
+    fixture.assert_temp_removed()
+}
+
+#[test]
+fn absolute_user_rules_remain_external() -> TestResult {
+    let fixture = Fixture::new()?;
+    let external = fixture.root.path().join("user-rules");
+    fs::rename(fixture.repo.join(".aic/rules"), &external)?;
+    fixture.commit()?;
+    fs::create_dir_all(fixture.root.path().join("config/aic"))?;
+    fs::write(
+        fixture.root.path().join("config/aic/config.toml"),
+        format!("[layers.l2]\nrules_dir='{}'\n", external.display()),
+    )?;
+    fixture.audit("t-task")?.assert().code(1);
+    assert!(fs::read_to_string(fixture.root.path().join("context"))?.contains("Check the diff."));
+    fixture.assert_temp_removed()
+}
+
+#[test]
+fn config_error_removes_snapshot_before_main_exits() -> TestResult {
+    let fixture = Fixture::new()?;
+    fs::write(fixture.repo.join(".aic/config.toml"), "invalid !")?;
+    fixture.commit()?;
+    fixture.audit("t-task")?.assert().code(4);
+    fixture.assert_temp_removed()
 }

@@ -9,7 +9,7 @@ pub type TestResult = Result<(), Box<dyn Error>>;
 pub const PATCH: &str = "diff --git a/src/task.rs b/src/task.rs\n--- a/src/task.rs\n\
     +++ b/src/task.rs\n@@ -1 +1 @@\n-old-line\n+task-patch-line\n";
 const FAKE_AID: &str = r#"#!/bin/sh
-if [ "$3" = --patch-base ]; then
+if [ "$#" = 3 ] && [ "$1" = show ] && [ "$2" = t-task ] && [ "$3" = --start-commit ]; then
     cat "$RECORD/base"
     exit
 fi
