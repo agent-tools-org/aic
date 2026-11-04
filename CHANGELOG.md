@@ -4,6 +4,13 @@ All notable changes to `aic` are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.3.2 (2026-11-04)
+
+- Read task audit configuration, rules and the Cargo default from the commit `aid show <task-id> --start-commit` prints, so a task's edits to repository content cannot change its own audit; require an aid release supporting it.
+- Fail with exit code 4 when the start commit cannot be read, without falling back to the working tree.
+- Ignore git replace refs when reading the start commit.
+- Reject a relative `rules_dir` that normalizes to the repository root.
+
 ## v0.3.1 (2026-11-03)
 
 - Preserve quoted, spaced, renamed, copied and deleted touched paths; audit non-UTF-8 patches.
