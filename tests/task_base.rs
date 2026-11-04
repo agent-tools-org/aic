@@ -8,6 +8,18 @@ mod support;
 use support::*;
 
 #[test]
+fn last_output_line_names_the_written_report() -> TestResult {
+    let fixture = Fixture::new()?;
+    let output = fixture.audit("t-task")?.output()?;
+    let stdout = String::from_utf8(output.stdout)?;
+    let path = stdout.lines().last().and_then(|line| line.strip_prefix("report: "));
+    let path = path.ok_or("last line does not name the report")?;
+    assert!(std::path::Path::new(path).is_absolute(), "{path}");
+    assert!(!fs::read_to_string(path)?.is_empty());
+    Ok(())
+}
+
+#[test]
 fn task_cannot_disable_base_l2_or_weaken_rule() -> TestResult {
     let fixture = Fixture::new()?;
     fs::write(

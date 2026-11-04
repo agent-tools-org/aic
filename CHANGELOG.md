@@ -10,6 +10,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fail with exit code 4 when the start commit cannot be read, without falling back to the working tree.
 - Ignore git replace refs when reading the start commit.
 - Reject a relative `rules_dir` that normalizes to the repository root.
+- Print `report: <path>` as the last line of task audit output, so aid records the report.
 
 ## v0.3.1 (2026-11-03)
 

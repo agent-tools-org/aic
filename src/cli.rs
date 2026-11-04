@@ -62,6 +62,8 @@ fn run_audit(args: AuditArgs, explicit_config: Option<&Path>) -> Result<()> {
             &audit_dir.join("report.md"),
         );
     }
+    // aid records the audit report from this exact last line of stdout.
+    println!("report: {}", audit_dir.join("report.md").display());
     exit_for_verdict(&result.verdict);
     Ok(())
 }
