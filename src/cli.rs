@@ -139,7 +139,8 @@ fn init_tracing(verbose: bool) -> Result<()> {
 #[derive(Debug, Parser)]
 #[command(name = "aic", version, about = "Cross-audit aid agent outputs")]
 struct Cli {
-    /// Explicit config override; task audits otherwise load .aic/config.toml from the patch base.
+    /// Explicit config override; task audits otherwise load .aic/config.toml from aid's recorded
+    /// start commit.
     #[arg(long, value_name = "path")] config: Option<PathBuf>,
     #[arg(short, long)] verbose: bool,
     #[command(subcommand)] command: Commands,

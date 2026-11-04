@@ -60,8 +60,6 @@ fn malformed_or_unreadable_base_never_reads_checkout_config() -> TestResult {
         assert!(stderr.contains("newer aid"));
         assert!(!stderr.contains("parse"));
     }
-    fs::write(fixture.root.path().join("bin/aid"), "#!/bin/sh\nexit 9\n")?;
-    fixture.audit("t-task")?.assert().code(4);
     Ok(())
 }
 
@@ -213,4 +211,75 @@ fn config_error_removes_snapshot_before_main_exits() -> TestResult {
     fixture.commit()?;
     fixture.audit("t-task")?.assert().code(4);
     fixture.assert_temp_removed()
+}
+
+#[test]
+fn start_commit_failure_never_reads_checkout_config() -> TestResult {
+    let fixture = Fixture::new()?;
+    fs::write(fixture.repo.join(".aic/config.toml"), "invalid toml !")?;
+    fs::write(
+        fixture.root.path().join("bin/aid"),
+        "#!/bin/sh\nif [ \"$3\" = --patch ]; then cat \"$RECORD/patch\"; exit; fi\n\
+        if [ \"$3\" = --start-commit ]; then echo start-failed >&2; exit 9; fi\nexit 8\n",
+    )?;
+    let output = fixture
+        .audit("t-task")?
+        .assert()
+        .code(4)
+        .get_output()
+        .stderr
+        .clone();
+    let stderr = String::from_utf8(output)?;
+    assert!(stderr.contains("aid show --start-commit failed: start-failed"));
+    assert!(stderr.contains("newer aid"));
+    assert!(!stderr.contains("parse"));
+    assert!(!fixture.repo.join(".aic/audits").exists());
+    fixture.assert_temp_removed()
+}
+
+#[test]
+fn git_replace_cannot_disable_start_commit_audit() -> TestResult {
+    let fixture = Fixture::new()?;
+    let start = fs::read_to_string(fixture.root.path().join("base"))?;
+    let path = fixture.repo.join(".aic/config.toml");
+    let config = fs::read_to_string(&path)?;
+    fs::write(&path, config.replace("enabled=true", "enabled=false"))?;
+    fixture.commit()?;
+    let forged = fs::read_to_string(fixture.root.path().join("base"))?;
+    let status = std::process::Command::new("git")
+        .args(["replace", start.trim(), forged.trim()])
+        .current_dir(&fixture.repo)
+        .status()?;
+    assert!(status.success());
+    fs::write(fixture.root.path().join("base"), start)?;
+    fixture.audit("t-task")?.assert().code(1);
+    assert!(fs::read_to_string(fixture.root.path().join("context"))?.contains("Check the diff."));
+    fixture.assert_temp_removed()
+}
+
+#[test]
+fn rules_dir_cannot_normalize_to_repository_root() -> TestResult {
+    let fixture = Fixture::new()?;
+    let path = fixture.repo.join(".aic/config.toml");
+    let config = fs::read_to_string(&path)?;
+    for rules in [".", "policy/.."] {
+        fs::write(
+            &path,
+            config.replace(
+                "enabled=true",
+                &format!("enabled=true\nrules_dir='{rules}'"),
+            ),
+        )?;
+        fixture.commit()?;
+        let output = fixture
+            .audit("t-task")?
+            .assert()
+            .code(4)
+            .get_output()
+            .stderr
+            .clone();
+        assert!(String::from_utf8(output)?.contains("must not normalize to the repository root"));
+        fixture.assert_temp_removed()?;
+    }
+    Ok(())
 }

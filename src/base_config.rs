@@ -93,6 +93,9 @@ fn relative_path(value: &str) -> Result<PathBuf> {
             _ => bail!("config path escapes repository: {value}"),
         }
     }
+    if result.as_os_str().is_empty() {
+        bail!("relative rules_dir must not normalize to the repository root: {value}");
+    }
     Ok(result)
 }
 
@@ -104,6 +107,12 @@ fn materialize(repo: &Path, base: &str, path: &Path, dest: &Path) -> Result<()> 
         let entry = std::str::from_utf8(entry).context("non UTF-8 base tree path")?;
         let (metadata, file) = entry.split_once('\t').context("invalid git tree entry")?;
         let file_path = Path::new(file);
+        if file_path
+            .components()
+            .any(|part| !matches!(part, Component::Normal(_)))
+        {
+            bail!("base tree path contains a non-normal component: {file}");
+        }
         if file_path != path && !file_path.starts_with(path) && !path.starts_with(file_path) {
             continue;
         }
@@ -145,6 +154,7 @@ fn git(repo: &Path, args: &[&str]) -> Result<Vec<u8>> {
             command.env_remove(key);
         }
     }
+    command.env("GIT_NO_REPLACE_OBJECTS", "1");
     let output = command
         .current_dir(repo)
         .args(args)

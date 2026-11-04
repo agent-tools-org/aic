@@ -73,7 +73,11 @@ Missing base config uses user config and defaults; checkout additions apply to l
 Base lookup errors fail with exit 4 and require an aid version supporting `--start-commit`.
 Relative rule paths escaping the repository are rejected. Absolute user-config rule paths
 remain external; project-config rule paths must be relative to the repository.
-Commands still execute in the working tree, and reports are written to `.aic/audits/` there.
+A task's edits to repository content, including `.aic/`, `Cargo.toml`, and Git replace refs,
+cannot change its own audit configuration. This does not contain an unsandboxed agent running
+as the same user that can rewrite aid's database or the user config. Config-defined L0 and L1
+commands still run the delivered code.
+Reports are written to `.aic/audits/` in the working tree.
 `layers.l4.scripts` is currently unused. L0/L1 command strings execute as shell commands.
 An explicit top-level `--config <path>` uses the caller's file and checkout paths instead;
 `--diff <path>` keeps loading the default config from the working tree. `aic init` is unchanged.
