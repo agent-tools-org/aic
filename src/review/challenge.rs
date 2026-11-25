@@ -55,7 +55,7 @@ pub fn prompt(diff: &str, claims: &str, source: Source) -> String {
     let claims = sanitize_for_delimiters(claims, DELIMITERS);
     let (what, reading) = match source {
         Source::Judge => ("The claims are numbered findings rated high; use the number as `finding`.",
-            "Respond based ONLY on the content between the delimiters. Do NOT read any other file or make any tool call."),
+            "Respond based ONLY on the content between the delimiters. Do NOT read any other file, list directories, run greps, or make any other tool call."),
         Source::Report => ("The claims are an audit report. Challenge every finding the report rates high, or that it uses to justify FIX or BLOCK; use the finding's title as `finding`.",
             "You may read repository files to trace a trigger. Do not modify anything."),
     };
