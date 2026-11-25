@@ -48,7 +48,7 @@ fn parse_bug(value: &Value) -> Option<Bug> {
 
 /// Highest impact first, then cut to `limit`, so truncation never drops a high finding.
 pub fn rank_bugs(mut bugs: Vec<Bug>, limit: usize) -> Vec<Bug> {
-    bugs.sort_by(|left, right| right.impact.cmp(&left.impact));
+    bugs.sort_by_key(|bug| std::cmp::Reverse(bug.impact));
     bugs.truncate(limit);
     bugs
 }
