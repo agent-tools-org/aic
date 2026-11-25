@@ -3,7 +3,13 @@
 use super::json_extract::{extract_json_object, repair_partial_json, SchemaHint};
 use serde_json::Value;
 
-pub(super) fn judge_json(output: &str, hint: SchemaHint) -> Option<String> {
+/// The final answer block when it is exactly one complete JSON object, with no repair.
+pub(crate) fn strict_final_json(output: &str) -> Option<Value> {
+    let value: Value = serde_json::from_str(strip_fence(final_block(output).trim())).ok()?;
+    value.is_object().then_some(value)
+}
+
+fn final_block(output: &str) -> &str {
     let mut final_block = output;
     let mut offset = 0;
     for line in output.split_inclusive('\n') {
@@ -12,7 +18,11 @@ pub(super) fn judge_json(output: &str, hint: SchemaHint) -> Option<String> {
         }
         offset += line.len();
     }
-    let block = strip_fence(final_block.trim());
+    final_block
+}
+
+pub(super) fn judge_json(output: &str, hint: SchemaHint) -> Option<String> {
+    let block = strip_fence(final_block(output).trim());
     if !block.starts_with('{') {
         return None;
     }

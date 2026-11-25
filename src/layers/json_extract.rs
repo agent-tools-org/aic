@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SchemaHint { L2, L3 }
-const KNOWN_SCHEMA_HINT_FIELDS: [&str; 6] = ["verdict", "violated_rules", "bugs", "severity", "reason", "cited_lines"];
+const KNOWN_SCHEMA_HINT_FIELDS: [&str; 5] = ["verdict", "violated_rules", "bugs", "reason", "cited_lines"];
 
 pub fn extract_json_object(s: &str) -> Option<&str> {
     let text = strip_code_fence(s.trim());
@@ -98,7 +98,7 @@ fn extract_rules_from_value(value: &Value) -> Vec<String> {
 fn extract_bugs_from_value(value: &Value) -> Vec<String> {
     value.get("bugs")
         .and_then(Value::as_array)
-        .map(|items| items.iter().filter_map(Value::as_str).map(|item| item.trim().to_owned()).filter(|item| !item.is_empty()).collect())
+        .map(|items| items.iter().filter_map(|item| item.get("bug").unwrap_or(item).as_str()).map(|item| item.trim().to_owned()).filter(|item| !item.is_empty()).collect())
         .unwrap_or_default()
 }
 
@@ -125,8 +125,7 @@ fn synthesize_partial(raw: &str, schema_hint: SchemaHint, violated_rules: Vec<St
         .to_string(),
         SchemaHint::L3 => json!({
             "verdict": "fail",
-            "bugs": [detail],
-            "severity": "advisory",
+            "bugs": [{"impact": "medium", "bug": detail, "trigger": "partial judge response"}],
             "violated_rules": violated_rules,
         })
         .to_string(),
@@ -144,8 +143,7 @@ fn synthesize_inconclusive(raw: &str, schema_hint: SchemaHint, value: &Value) ->
         .to_string(),
         SchemaHint::L3 => json!({
             "verdict": "inconclusive",
-            "bugs": [detail],
-            "severity": value.get("severity").and_then(Value::as_str).unwrap_or("advisory"),
+            "bugs": [{"impact": "low", "bug": detail, "trigger": ""}],
             "violated_rules": [],
         })
         .to_string(),
@@ -176,8 +174,7 @@ mod tests {
     #[derive(Debug, Deserialize)]
     struct L3Response {
         verdict: String,
-        bugs: Vec<String>,
-        severity: String,
+        bugs: Vec<serde_json::Value>,
         violated_rules: Vec<String>,
     }
 
@@ -224,10 +221,10 @@ mod tests {
 
     #[test]
     fn schema_hint_only_payloads_become_inconclusive() {
-        let severity: L2Response = serde_json::from_str(&repair_partial_json("{\"severity\":\"blocking\"}", SchemaHint::L2).expect("repair")).expect("parse");
+        let cited: L2Response = serde_json::from_str(&repair_partial_json("{\"cited_lines\":[]}", SchemaHint::L2).expect("repair")).expect("parse");
         let reason: L2Response = serde_json::from_str(&repair_partial_json("{\"reason\":\"looks sketchy\"}", SchemaHint::L2).expect("repair")).expect("parse");
-        assert_eq!(severity.verdict, "inconclusive");
-        assert!(severity.reason.contains("partial:"));
+        assert_eq!(cited.verdict, "inconclusive");
+        assert!(cited.reason.contains("partial:"));
         assert_eq!(reason.verdict, "inconclusive");
         assert_eq!(reason.reason, "looks sketchy");
     }
@@ -260,7 +257,7 @@ mod tests {
 
     #[test]
     fn rejects_preamble_then_json() {
-        let raw = "Sure, here is the result: {\"verdict\":\"fail\",\"bugs\":[],\"severity\":\"blocking\",\"violated_rules\":[]}";
+        let raw = "Sure, here is the result: {\"verdict\":\"fail\",\"bugs\":[],\"violated_rules\":[]}";
         assert_eq!(repair_partial_json(raw, SchemaHint::L3), None);
     }
 
@@ -269,8 +266,8 @@ mod tests {
         let parsed: L3Response = serde_json::from_str(&repair_partial_json("{\"violated_rules\":[\"r1\",\"r2\"]}", SchemaHint::L3).expect("repair")).expect("parse");
         assert_eq!(parsed.verdict, "fail");
         assert_eq!(parsed.violated_rules, vec!["r1", "r2"]);
-        assert_eq!(parsed.severity, "advisory");
-        assert!(parsed.bugs[0].contains("partial:"));
+        assert_eq!(parsed.bugs[0]["impact"], "medium");
+        assert!(parsed.bugs[0]["bug"].as_str().expect("bug text").contains("partial:"));
     }
 
     #[test]

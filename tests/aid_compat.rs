@@ -119,7 +119,7 @@ fn check_final_answers(root: &Path) -> Result<(), Box<dyn Error>> {
         ..L3::default()
     };
     let pass = r#"{"verdict":"pass","reason":"No unwrap usage.","cited_lines":[]}"#;
-    let fail = r#"{"verdict":"fail","reason":"Blocking bug","bugs":["bug"],"severity":"blocking"}"#;
+    let fail = r#"{"verdict":"fail","reason":"Blocking bug","bugs":[{"impact":"high","bug":"bug","trigger":"any input"}]}"#;
     let preamble = "I'll read the full context file and keep all actions read-only.\n\n---\n\
         [MILESTONE] Read the context and checked the diff for unwrap usage.\n\n---\n";
     let cases = [

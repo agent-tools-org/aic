@@ -113,6 +113,34 @@ aib_auto_block = true
 budget_usd_per_audit = 5.0
 ```
 
+## Impact and the Challenge Guard
+
+L3 judges rate every finding `high`, `medium` or `low`, each with a trigger (the concrete input or
+sequence of states that reaches it). The vote follows the ratings, not the judge's own verdict:
+a high finding is blocking, a medium one is advisory, and low findings pass and stay in the report.
+A finding without a trigger is low. A violated L3 rule votes by its declared `severity`.
+
+- **high**: a reachable path the change introduces that, in normal use or for an actor who crosses
+  a real permission boundary, gives wrong results, loses or corrupts data, breaks a security
+  boundary, crashes, or breaks something that worked before.
+- **medium**: a real defect on a reachable but uncommon path whose effect is visible and recoverable.
+- **low**: everything else, including style, docs, test coverage, an actor who already holds what
+  the finding says they gain, environment faults such as clock skew, code the change does not
+  touch, and any finding without a concrete trigger.
+
+Before L3 returns a blocking verdict, each blocking vote's high findings go to the next configured
+model as a challenger. It traces the trigger, the actor and the code before the change, and may
+only lower a rating, quoting evidence; an unparsed answer leaves the findings as they were. With
+one configured model, that model challenges its own findings. A wrong downgrade lets a real defect
+through, so the challenger sees the same diff and rubric as the judges.
+
+`aic challenge --report <result.md> --diff <patch> --agent <name>` runs the same guard over a
+free-form audit report, such as one written by an `aid` read-only audit. Run it from the audited
+checkout: the challenger may read repository files to trace a trigger. It prints one row per high
+finding and exits 0 when none is upheld (SHIP), 1 when one is (FIX), 3 when the challenger gave
+no answer (the report stands), and 4 on a runtime error. Pick a challenger from a different
+vendor than the auditor.
+
 ## Rule Authoring
 
 Rules live in `.aic/rules/*.md` with YAML frontmatter.
