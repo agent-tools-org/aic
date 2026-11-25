@@ -133,7 +133,10 @@ Before L3 returns a blocking verdict, each blocking vote's high findings go to t
 model as a challenger, covering both swap positions. It traces the trigger, the actor and the
 code before the change, and may only lower a rating by citing a `file:line`; repeated decisions
 keep the highest impact, and an unparsed answer leaves the findings as they were. Every high
-finding is kept when the bug list is capped, and an answer rebuilt from partial JSON never passes. With
+finding is kept when the bug list is capped, and an answer rebuilt from partial JSON never passes.
+aic checks only that a lowering names a `file:line`, not that the location supports it: a
+challenger that cites a wrong or invented location can clear a real high finding. The challenge
+evidence is kept in the report so the lowering can be read and checked. With
 one configured model, that model challenges its own findings. A wrong downgrade lets a real defect
 through, so the challenger sees the same diff and rubric as the judges.
 

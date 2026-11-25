@@ -81,7 +81,7 @@ fn merge_reviews(normal: Option<Review>, swapped: Option<Review>) -> Option<Revi
         (review, None) | (None, review) => return review,
     };
     for bug in other.bugs {
-        if !merged.bugs.iter().any(|kept| kept.bug == bug.bug) { merged.bugs.push(bug); }
+        if !merged.bugs.iter().any(|kept| kept.bug == bug.bug && kept.trigger == bug.trigger) { merged.bugs.push(bug); }
     }
     merged.violated_rules.extend(other.violated_rules);
     merged.violated_rules.sort();

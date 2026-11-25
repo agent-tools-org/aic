@@ -147,6 +147,14 @@ fn swap_positions_challenge_the_union_of_their_high_findings() {
     assert!(claims.contains("1. drops the last row") && claims.contains("2. loses the cursor"));
 }
 #[test]
+fn swap_findings_with_one_description_and_two_triggers_are_both_challenged() {
+    let retry = "{\"verdict\":\"fail\",\"bugs\":[{\"impact\":\"high\",\"bug\":\"drops the last row\",\"trigger\":\"a retry\"}],\"violated_rules\":[]}";
+    let config = L3 { enabled: true, models: vec!["codex".into()], swap: true, consensus_threshold: 1 };
+    let (verdict, _, dispatcher) = run(&config, &[], &[(HIGH, 0.0), (retry, 0.0), (REFUTED, 0.0)]);
+    assert!(matches!(verdict, Verdict::FailBlocking { .. }), "{verdict:?}");
+    assert!(dispatcher.prompts()[2].contains("2. drops the last row (trigger: a retry)"));
+}
+#[test]
 fn a_repaired_partial_answer_cannot_pass() {
     let truncated = "{\"verdict\":\"fail\",\"bugs\":[{\"impact\":\"low\",\"bug\":\"drops a row\",\"trigger\":\"one-row batch\"}],\"violated_rules\":[]";
     let (verdict, _, _) = run(&single_model_config(), &[], &[(truncated, 0.0)]);
