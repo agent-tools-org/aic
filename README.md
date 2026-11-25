@@ -147,8 +147,9 @@ finding and exits 0 when none is upheld (SHIP), 1 when one is (FIX), 3 when the 
 no answer (the report stands), and 4 on a runtime error. Pick a challenger from a different
 vendor than the auditor. The challenger also reports how many high findings it found: aic cannot
 count them in free-form prose, so a challenger that skips a finding without counting it passes it.
-`aid show` renders agy's JSON answers as an unrecognized log, so agy cannot be a challenger or
-an L3 judge yet.
+Measured challengers: codex and claude return the challenge JSON. agy cannot serve yet, because
+`aid show` renders its JSON answer as an unrecognized log; neither can cursor, which answers a
+read-only task in plan mode and leaves the JSON inside a plan tool call. Both cases exit 3.
 
 ## Rule Authoring
 
