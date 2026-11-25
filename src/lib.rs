@@ -10,6 +10,7 @@ pub mod init;
 pub mod layers;
 pub mod persist;
 pub mod pipeline;
+pub mod review;
 pub mod rules;
 pub mod types;
 mod touched_paths;

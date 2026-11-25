@@ -113,6 +113,44 @@ aib_auto_block = true
 budget_usd_per_audit = 5.0
 ```
 
+## Impact and the Challenge Guard
+
+L3 judges rate every finding `high`, `medium` or `low`, each with a trigger (the concrete input or
+sequence of states that reaches it). The vote follows the ratings, not the judge's own verdict:
+a high finding is blocking, a medium one is advisory, and low findings pass and stay in the report.
+A finding without a trigger is low. A violated L3 rule votes by its declared `severity`.
+
+- **high**: the change leaves the code worse than before it: a reachable path it introduces or
+  alters that, in normal use or for an actor who crosses a real permission boundary, gives wrong results, loses or corrupts data, breaks a security
+  boundary, crashes, or breaks something that worked before.
+- **medium**: a real defect on a reachable but uncommon path whose effect is visible and recoverable.
+- **low**: everything else, including style, docs, test coverage, an actor who already holds what
+  the finding says they gain, environment faults such as clock skew, code the change does not
+  touch, a defect the code had before the change (including one the change reduces but does not
+  remove), and any finding without a concrete trigger.
+
+Before L3 returns a blocking verdict, each blocking vote's high findings go to the next configured
+model as a challenger, covering both swap positions. It traces the trigger, the actor and the
+code before the change, and may only lower a rating by citing a `file:line`; repeated decisions
+keep the highest impact, and an unparsed answer leaves the findings as they were. Every high
+finding is kept when the bug list is capped, and an answer rebuilt from partial JSON never passes.
+aic checks only that a lowering names a `file:line`, not that the location supports it: a
+challenger that cites a wrong or invented location can clear a real high finding. The challenge
+evidence is kept in the report so the lowering can be read and checked. With
+one configured model, that model challenges its own findings. A wrong downgrade lets a real defect
+through, so the challenger sees the same diff and rubric as the judges.
+
+`aic challenge --report <result.md> --diff <patch> --agent <name>` runs the same guard over a
+free-form audit report, such as one written by an `aid` read-only audit. Run it from the audited
+checkout: the challenger may read repository files to trace a trigger. It prints one row per high
+finding and exits 0 when none is upheld (SHIP), 1 when one is (FIX), 3 when the challenger gave
+no answer (the report stands), and 4 on a runtime error. Pick a challenger from a different
+vendor than the auditor. The challenger also reports how many high findings it found: aic cannot
+count them in free-form prose, so a challenger that skips a finding without counting it passes it.
+Measured challengers: codex and claude return the challenge JSON. agy cannot serve yet, because
+`aid show` renders its JSON answer as an unrecognized log; neither can cursor, which answers a
+read-only task in plan mode and leaves the JSON inside a plan tool call. Both cases exit 3.
+
 ## Rule Authoring
 
 Rules live in `.aic/rules/*.md` with YAML frontmatter.

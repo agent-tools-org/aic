@@ -4,7 +4,7 @@
 use std::{fs, path::{Path, PathBuf}};
 
 pub mod json_extract;
-mod judge_output;
+pub(crate) mod judge_output;
 pub mod aid_dispatch;
 pub mod l0;
 pub mod l1;

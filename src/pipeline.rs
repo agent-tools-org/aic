@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use std::{fs, path::{Path, PathBuf}, time::Instant};
 
 /// A judge reads the diff through its own file tool, so a partial read must stay improbable.
-const MAX_JUDGE_DIFF_BYTES: usize = 128 * 1024;
+pub(crate) const MAX_JUDGE_DIFF_BYTES: usize = 128 * 1024;
 
 pub struct Pipeline<'cfg> {
     pub config: &'cfg Config,

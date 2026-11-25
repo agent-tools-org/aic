@@ -34,6 +34,15 @@ fn audit_help_shows_diff_option() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn challenge_help_shows_report_diff_and_agent() -> Result<(), Box<dyn Error>> {
+    let stdout = stdout_for(&["challenge", "--help"])?;
+    for flag in ["--report <path>", "--diff <path>", "--agent <name>"] {
+        assert!(stdout.contains(flag), "missing {flag}");
+    }
+    Ok(())
+}
+
+#[test]
 fn init_stub_exits_successfully() -> Result<(), Box<dyn Error>> {
     let stdout = stdout_for(&["init"])?;
     assert!(stdout.contains("not yet implemented: init"));

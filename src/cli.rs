@@ -4,7 +4,9 @@
 use crate::aib::AibClient;
 use crate::config::Config;
 use crate::init;
+use crate::layers::aid_dispatch::RealAidDispatcher;
 use crate::persist::{persist_audit, render_markdown_report};
+use crate::review::report::{challenge_report, render};
 use crate::pipeline::Pipeline;
 use crate::types::{AuditContext, AuditRequest, Verdict};
 use anyhow::{anyhow, bail, Context, Result};
@@ -25,6 +27,7 @@ pub fn run() -> Result<()> {
         Commands::Audit(args) => {
             run_audit(args, cli.config.as_deref())?;
         }
+        Commands::Challenge(args) => run_challenge(&args)?,
         command => println!("not yet implemented: {}", command.stub_name()),
     }
     Ok(())
@@ -66,6 +69,15 @@ fn run_audit(args: AuditArgs, explicit_config: Option<&Path>) -> Result<()> {
     println!("report: {}", audit_dir.join("report.md").display());
     exit_for_verdict(&result.verdict);
     Ok(())
+}
+
+fn run_challenge(args: &ChallengeArgs) -> Result<()> {
+    let outcome = challenge_report(&args.report, &args.diff, &args.agent, &RealAidDispatcher)?;
+    print!("{}", render(&outcome));
+    match outcome.exit_code() {
+        0 => Ok(()),
+        code => std::process::exit(code),
+    }
 }
 
 fn apply_aib_verdict(board_item: Option<&str>, verdict: &Verdict, report_path: &Path) {
@@ -152,6 +164,9 @@ struct Cli {
 enum Commands {
     Init,
     Audit(AuditArgs),
+    /// Challenge the high findings of an audit report against the diff it audited; exits 0 when
+    /// none is upheld, 1 when one is, 3 when the challenger gave no answer.
+    Challenge(ChallengeArgs),
     Report { #[arg(value_name = "task-id")] task_id: String },
     Checklist { #[command(subcommand)] command: ChecklistCommands },
 }
@@ -161,6 +176,7 @@ impl Commands {
         match self {
             Self::Init => "init",
             Self::Audit(args) => args.stub_name(),
+            Self::Challenge(_) => "challenge",
             Self::Report { task_id } => {
                 let _target = task_id.as_str();
                 "report"
@@ -185,6 +201,16 @@ impl AuditArgs {
         let _board_item = self.board_item.as_deref();
         "audit"
     }
+}
+
+#[derive(Debug, Args)]
+struct ChallengeArgs {
+    /// The audit report to challenge, such as an aid task's result.md.
+    #[arg(long, value_name = "path")] report: PathBuf,
+    /// The diff the report audited; run from the checkout the report cites.
+    #[arg(long, value_name = "path")] diff: PathBuf,
+    /// The aid agent that challenges; choose one from a different vendor than the auditor.
+    #[arg(long, value_name = "name")] agent: String,
 }
 
 #[derive(Debug, Subcommand)]
