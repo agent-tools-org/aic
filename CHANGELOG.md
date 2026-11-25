@@ -4,6 +4,15 @@ All notable changes to `aic` are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.4.0 (2026-11-25)
+
+- Rate every L3 finding high, medium or low with a trigger; the vote follows the ratings and the declared severity of violated rules: high blocks, medium is advisory, low passes and stays in the report. A finding without a trigger is low.
+- High means the change leaves the code worse than before it; a defect the code already had, including one the change reduces without removing, is low.
+- Before a blocking L3 verdict, send each blocking vote's high findings from both swap positions to the next configured model, which may only lower a rating by citing a `file:line`; an unparsed answer leaves the findings as they were.
+- Keep every high finding when the bug list is capped, and never pass a vote rebuilt from partial JSON.
+- Add `aic challenge --report <file> --diff <file> --agent <name>` to challenge the high findings of a free-form audit report: exit 0 when none is upheld, 1 when one is, 3 when the challenger gives no answer.
+- Remove the L3 `severity` response field.
+
 ## v0.3.2 (2026-11-04)
 
 - Read task audit configuration, rules and the Cargo default from the commit `aid show <task-id> --start-commit` prints, so a task's edits to repository content cannot change its own audit; require an aid release supporting it.
