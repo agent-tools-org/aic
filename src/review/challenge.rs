@@ -63,9 +63,9 @@ pub fn prompt(diff: &str, claims: &str, source: Source) -> String {
 [TASK]\nEach claim says this change has a high-impact defect. For each one, establish whether it holds:\n\
 1. Trace the trigger: name the concrete input or sequence of states that reaches the defect, with file:line.\n\
 2. Name the actor who reaches it, and whether that actor already holds the capability the claim says they gain.\n\
-3. Check whether the code before this change already behaved the same way.\n\
+3. Compare with the code before this change: is this version worse, or does it improve a problem without removing all of it?\n\
 4. Rate the impact with the rubric below.\n\
-Decide `upheld` when the trigger is traced and the rubric gives high; `downgraded` with the rubric's lower impact otherwise; \
+Decide `upheld` when the trigger is traced, this version is worse than the one before it, and the rubric gives high; `downgraded` with the rubric's lower impact otherwise; \
 `refuted` when the described behaviour does not occur; `inconclusive` when you could not read what you needed. \
 Every downgraded or refuted decision must quote the evidence that decides it.\n\n{RUBRIC}\n\n{what}\n\n\
 Required schema:\n{{\"high_findings\":<number of claims you challenged>,\"decisions\":[{{\"finding\":\"<id>\",\"decision\":\"upheld\"|\"downgraded\"|\"refuted\"|\"inconclusive\",\"impact\":\"high\"|\"medium\"|\"low\",\"evidence\":\"<file:line and reason>\"}}]}}\n\n\

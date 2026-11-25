@@ -120,13 +120,14 @@ sequence of states that reaches it). The vote follows the ratings, not the judge
 a high finding is blocking, a medium one is advisory, and low findings pass and stay in the report.
 A finding without a trigger is low. A violated L3 rule votes by its declared `severity`.
 
-- **high**: a reachable path the change introduces that, in normal use or for an actor who crosses
-  a real permission boundary, gives wrong results, loses or corrupts data, breaks a security
+- **high**: the change leaves the code worse than before it: a reachable path it introduces or
+  alters that, in normal use or for an actor who crosses a real permission boundary, gives wrong results, loses or corrupts data, breaks a security
   boundary, crashes, or breaks something that worked before.
 - **medium**: a real defect on a reachable but uncommon path whose effect is visible and recoverable.
 - **low**: everything else, including style, docs, test coverage, an actor who already holds what
   the finding says they gain, environment faults such as clock skew, code the change does not
-  touch, and any finding without a concrete trigger.
+  touch, a defect the code had before the change (including one the change reduces but does not
+  remove), and any finding without a concrete trigger.
 
 Before L3 returns a blocking verdict, each blocking vote's high findings go to the next configured
 model as a challenger. It traces the trigger, the actor and the code before the change, and may

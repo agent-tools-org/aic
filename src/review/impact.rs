@@ -5,9 +5,9 @@ use serde_json::Value;
 
 /// The one impact rubric every aic judge and challenger is given.
 pub const RUBRIC: &str = "Rate each finding by its impact on what this change does:\n\
-- high: a reachable path this change introduces that, in normal use or for an actor who crosses a real permission boundary, gives wrong results, loses or corrupts data, breaks a security boundary, crashes, or breaks something that worked before.\n\
+- high: this change leaves the code worse than before it: a reachable path it introduces or alters that, in normal use or for an actor who crosses a real permission boundary, gives wrong results, loses or corrupts data, breaks a security boundary, crashes, or breaks something that worked before.\n\
 - medium: a real defect on a reachable but uncommon path whose effect is visible and recoverable.\n\
-- low: everything else, including style, naming, docs, test coverage, an actor who already holds what the finding says they gain (the same user, the user's own configuration), environment faults such as clock skew or a full disk, code this change does not touch, and any finding without a concrete trigger.";
+- low: everything else, including style, naming, docs, test coverage, an actor who already holds what the finding says they gain (the same user, the user's own configuration), environment faults such as clock skew or a full disk, code this change does not touch, a defect the code had before this change (including one this change reduces but does not remove), and any finding without a concrete trigger.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Impact { Low, Medium, High }
@@ -61,6 +61,12 @@ pub fn max_impact(bugs: &[Bug]) -> Option<Impact> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn rubric_reserves_high_for_a_change_that_is_worse_than_before() {
+        assert!(RUBRIC.contains("- high: this change leaves the code worse than before it"));
+        assert!(RUBRIC.contains("including one this change reduces but does not remove"));
+    }
 
     #[test]
     fn parses_bug_objects_and_forces_low_without_trigger() {
