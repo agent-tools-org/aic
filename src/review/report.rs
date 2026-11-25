@@ -86,10 +86,10 @@ mod tests {
 
     #[test]
     fn downgraded_report_ships_and_upheld_report_fixes() {
-        let downgraded = outcome("{\"high_findings\":1,\"decisions\":[{\"finding\":\"token leaks\",\"decision\":\"downgraded\",\"impact\":\"low\",\"evidence\":\"only the same uid | can read it\"}]}");
+        let downgraded = outcome("{\"high_findings\":1,\"decisions\":[{\"finding\":\"token leaks\",\"decision\":\"downgraded\",\"impact\":\"low\",\"evidence\":\"src/env.rs:1 only the same uid | can read it\"}]}");
         assert_eq!(downgraded.exit_code(), 0);
         let text = render(&downgraded);
-        assert!(text.contains("| token leaks | downgraded | low | only the same uid \\| can read it |"));
+        assert!(text.contains("| token leaks | downgraded | low | src/env.rs:1 only the same uid \\| can read it |"));
         assert!(text.contains("verdict: SHIP"));
         let upheld = outcome("{\"high_findings\":2,\"decisions\":[{\"finding\":\"token leaks\",\"decision\":\"refuted\",\"impact\":\"low\",\"evidence\":\"a.rs:1\"}]}");
         assert_eq!(upheld.exit_code(), 1);

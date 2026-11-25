@@ -130,8 +130,10 @@ A finding without a trigger is low. A violated L3 rule votes by its declared `se
   remove), and any finding without a concrete trigger.
 
 Before L3 returns a blocking verdict, each blocking vote's high findings go to the next configured
-model as a challenger. It traces the trigger, the actor and the code before the change, and may
-only lower a rating, quoting evidence; an unparsed answer leaves the findings as they were. With
+model as a challenger, covering both swap positions. It traces the trigger, the actor and the
+code before the change, and may only lower a rating by citing a `file:line`; repeated decisions
+keep the highest impact, and an unparsed answer leaves the findings as they were. Every high
+finding is kept when the bug list is capped, and an answer rebuilt from partial JSON never passes. With
 one configured model, that model challenges its own findings. A wrong downgrade lets a real defect
 through, so the challenger sees the same diff and rubric as the judges.
 
@@ -140,7 +142,10 @@ free-form audit report, such as one written by an `aid` read-only audit. Run it 
 checkout: the challenger may read repository files to trace a trigger. It prints one row per high
 finding and exits 0 when none is upheld (SHIP), 1 when one is (FIX), 3 when the challenger gave
 no answer (the report stands), and 4 on a runtime error. Pick a challenger from a different
-vendor than the auditor.
+vendor than the auditor. The challenger also reports how many high findings it found: aic cannot
+count them in free-form prose, so a challenger that skips a finding without counting it passes it.
+`aid show` renders agy's JSON answers as an unrecognized log, so agy cannot be a challenger or
+an L3 judge yet.
 
 ## Rule Authoring
 

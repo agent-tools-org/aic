@@ -137,3 +137,18 @@ fn valid_json_skips_retry() {
     assert_eq!(dispatcher.prompts().len(), 1);
     assert!(evidence[0].detail.contains("retry=0"));
 }
+#[test]
+fn swap_positions_challenge_the_union_of_their_high_findings() {
+    let other = "{\"verdict\":\"fail\",\"bugs\":[{\"impact\":\"high\",\"bug\":\"loses the cursor\",\"trigger\":\"a retry\"}],\"violated_rules\":[]}";
+    let config = L3 { enabled: true, models: vec!["codex".into()], swap: true, consensus_threshold: 1 };
+    let (verdict, _, dispatcher) = run(&config, &[], &[(HIGH, 0.0), (other, 0.0), (REFUTED, 0.0)]);
+    assert!(matches!(verdict, Verdict::FailBlocking { .. }), "{verdict:?}");
+    let claims = &dispatcher.prompts()[2];
+    assert!(claims.contains("1. drops the last row") && claims.contains("2. loses the cursor"));
+}
+#[test]
+fn a_repaired_partial_answer_cannot_pass() {
+    let truncated = "{\"verdict\":\"fail\",\"bugs\":[{\"impact\":\"low\",\"bug\":\"drops a row\",\"trigger\":\"one-row batch\"}],\"violated_rules\":[]";
+    let (verdict, _, _) = run(&single_model_config(), &[], &[(truncated, 0.0)]);
+    assert!(matches!(verdict, Verdict::Inconclusive { .. }), "{verdict:?}");
+}

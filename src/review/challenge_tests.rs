@@ -10,7 +10,7 @@ fn answer(decisions: &str, high: usize) -> String {
 fn refuted_and_evidenced_downgrades_lower_impact() {
     let output = answer(
         "{\"finding\":\"1\",\"decision\":\"refuted\",\"impact\":\"high\",\"evidence\":\"a.rs:3 guards it\"},\
-         {\"finding\":2,\"decision\":\"downgraded\",\"impact\":\"low\",\"evidence\":\"same uid already reads the file\"}",
+         {\"finding\":2,\"decision\":\"downgraded\",\"impact\":\"low\",\"evidence\":\"src/runtime/session.rs:12 the same uid already reads it\"}",
         2,
     );
     let challenge = parse(&output).expect("parsed");
@@ -35,8 +35,34 @@ fn a_challenger_cannot_lower_without_evidence_or_raise() {
 }
 
 #[test]
+fn a_lowering_needs_a_cited_location() {
+    let output = answer(
+        "{\"finding\":\"1\",\"decision\":\"refuted\",\"evidence\":\"x\"},\
+         {\"finding\":\"2\",\"decision\":\"downgraded\",\"impact\":\"low\",\"evidence\":\"see the lib.rs file\"},\
+         {\"finding\":\"3\",\"decision\":\"refuted\",\"evidence\":\"guarded at (src/a.rs:10)\"}",
+        3,
+    );
+    let challenge = parse(&output).expect("parsed");
+    assert_eq!(challenge.upheld_high(), 2);
+    assert_eq!(settle(&challenge, 3), Impact::Low);
+}
+
+#[test]
+fn repeated_findings_keep_their_highest_impact_and_ids_are_required() {
+    let output = answer(
+        "{\"finding\":\"#1\",\"decision\":\"refuted\",\"evidence\":\"a.rs:1\"},\
+         {\"finding\":\"1\",\"decision\":\"upheld\",\"impact\":\"high\",\"evidence\":\"a.rs:2\"}",
+        1,
+    );
+    let challenge = parse(&output).expect("parsed");
+    assert_eq!(challenge.decisions.len(), 1);
+    assert_eq!(settle(&challenge, 1), Impact::High);
+    assert!(parse(&answer("{\"finding\":\" \",\"decision\":\"refuted\",\"evidence\":\"a.rs:1\"}", 1)).is_none());
+}
+
+#[test]
 fn skipped_findings_stay_high() {
-    let output = answer("{\"finding\":\"1\",\"decision\":\"refuted\",\"impact\":\"low\",\"evidence\":\"no path\"}", 3);
+    let output = answer("{\"finding\":\"1\",\"decision\":\"refuted\",\"impact\":\"low\",\"evidence\":\"a.rs:4 no path\"}", 3);
     let challenge = parse(&output).expect("parsed");
     assert_eq!(challenge.upheld_high(), 2);
     assert_eq!(settle(&challenge, 2), Impact::High);

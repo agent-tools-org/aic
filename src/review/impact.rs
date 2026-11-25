@@ -46,10 +46,11 @@ fn parse_bug(value: &Value) -> Option<Bug> {
     Some(Bug { impact, bug, trigger })
 }
 
-/// Highest impact first, then cut to `limit`, so truncation never drops a high finding.
+/// Highest impact first; every high finding is kept and the rest are cut to `limit`.
 pub fn rank_bugs(mut bugs: Vec<Bug>, limit: usize) -> Vec<Bug> {
     bugs.sort_by_key(|bug| std::cmp::Reverse(bug.impact));
-    bugs.truncate(limit);
+    let high = bugs.iter().filter(|bug| bug.impact == Impact::High).count();
+    bugs.truncate(high.max(limit));
     bugs
 }
 
@@ -90,6 +91,8 @@ mod tests {
         let bug = |impact, text: &str| Bug { impact, bug: text.into(), trigger: "t".into() };
         let ranked = rank_bugs(vec![bug(Impact::Low, "a"), bug(Impact::Low, "b"), bug(Impact::Medium, "c"), bug(Impact::High, "d")], 2);
         assert_eq!(ranked.iter().map(|bug| bug.bug.as_str()).collect::<Vec<_>>(), ["d", "c"]);
+        let all_high = rank_bugs(vec![bug(Impact::High, "a"), bug(Impact::High, "b"), bug(Impact::Low, "c"), bug(Impact::High, "d")], 2);
+        assert_eq!(all_high.iter().map(|bug| bug.bug.as_str()).collect::<Vec<_>>(), ["a", "b", "d"]);
         assert_eq!(max_impact(&ranked), Some(Impact::High));
         assert_eq!(max_impact(&[]), None);
     }

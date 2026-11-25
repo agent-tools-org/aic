@@ -22,12 +22,17 @@ fn final_block(output: &str) -> &str {
 }
 
 pub(super) fn judge_json(output: &str, hint: SchemaHint) -> Option<String> {
+    judge_json_marked(output, hint).map(|(json, _)| json)
+}
+
+/// The judge's final JSON object and whether it had to be repaired from a partial answer.
+pub(super) fn judge_json_marked(output: &str, hint: SchemaHint) -> Option<(String, bool)> {
     let block = strip_fence(final_block(output).trim());
     if !block.starts_with('{') {
         return None;
     }
     if let Ok(value) = serde_json::from_str::<Value>(block) {
-        return value.is_object().then(|| block.to_owned());
+        return value.is_object().then(|| (block.to_owned(), false));
     }
     // A complete object followed by prose or another object is not a single JSON answer.
     if extract_json_object(block).is_some() {
@@ -37,7 +42,7 @@ pub(super) fn judge_json(output: &str, hint: SchemaHint) -> Option<String> {
     let repaired = repair_partial_json(block, hint)
         .or_else(|| repair_partial_json(&format!("{block}}}"), hint))?;
     let value: Value = serde_json::from_str(&repaired).ok()?;
-    (value.get("verdict")?.as_str()? != "pass").then_some(repaired)
+    (value.get("verdict")?.as_str()? != "pass").then_some((repaired, true))
 }
 
 fn strip_fence(block: &str) -> &str {

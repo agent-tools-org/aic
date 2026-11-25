@@ -5,7 +5,7 @@ use crate::config::L3;
 use crate::layers::aid_dispatch::{AidDispatcher, AidResponse, RealAidDispatcher};
 use crate::layers::{render_artifact_context, sanitize_for_delimiters};
 use crate::layers::json_extract::{repair_partial_json, SchemaHint};
-use crate::layers::judge_output::judge_json;
+use crate::layers::judge_output::judge_json_marked;
 use crate::review::challenge::{self, Source};
 use crate::review::impact::{max_impact, parse_bugs, rank_bugs, Bug, Impact, RUBRIC};
 use crate::rules::{Rule, RuleSeverity};
@@ -25,7 +25,8 @@ pub struct L3Runner<'cfg> { pub config: &'cfg L3 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VoteKind { Pass, FailBlocking, FailAdvisory, Inconclusive }
 #[derive(Debug, Clone)]
-struct Review { verdict: String, bugs: Vec<Bug>, violated_rules: Vec<String> }
+/// `repaired` marks an answer rebuilt from partial JSON; it can fail a change but never pass it.
+struct Review { verdict: String, bugs: Vec<Bug>, violated_rules: Vec<String>, repaired: bool }
 #[derive(Debug, Clone)]
 struct CallOutcome { evidence: Evidence, vote: VoteKind, review: Option<Review> }
 #[derive(Debug, Deserialize)]
@@ -59,17 +60,35 @@ fn evaluate_models<D>(config: &L3, diff_text: &str, spec: Option<&str>, artifact
     for model in &config.models {
         let normal = dispatch_review(dispatcher, model, &prompt, rules);
         evaluation.evidence.push(normal.evidence);
+        let mut swapped_review = None;
         let vote = if config.swap {
             let swapped = dispatch_review(dispatcher, model, swapped_prompt.as_deref().unwrap_or(&prompt), rules);
             evaluation.evidence.push(swapped.evidence);
+            swapped_review = swapped.review;
             if normal.vote == swapped.vote { normal.vote } else { VoteKind::Inconclusive }
         } else {
             normal.vote
         };
         evaluation.votes.push(vote);
-        evaluation.reviews.push(normal.review);
+        evaluation.reviews.push(merge_reviews(normal.review, swapped_review));
     }
     evaluation
+}
+/// Both swap positions' findings face the challenge, so neither side's high finding is dropped.
+fn merge_reviews(normal: Option<Review>, swapped: Option<Review>) -> Option<Review> {
+    let (mut merged, other) = match (normal, swapped) {
+        (Some(normal), Some(swapped)) => (normal, swapped),
+        (review, None) | (None, review) => return review,
+    };
+    for bug in other.bugs {
+        if !merged.bugs.iter().any(|kept| kept.bug == bug.bug) { merged.bugs.push(bug); }
+    }
+    merged.violated_rules.extend(other.violated_rules);
+    merged.violated_rules.sort();
+    merged.violated_rules.dedup();
+    merged.repaired |= other.repaired;
+    merged.bugs = rank_bugs(merged.bugs, MAX_BUGS);
+    Some(merged)
 }
 /// Each blocking vote's high findings go to the next configured model, which may only lower them.
 fn challenge_blocking<D>(config: &L3, diff_text: &str, rules: &[&Rule], evaluation: &mut Evaluation, dispatcher: &D) where D: AidDispatcher + ?Sized {
@@ -123,11 +142,11 @@ fn dispatch_review<D>(dispatcher: &D, model: &str, prompt: &str, rules: &[&Rule]
     }
 }
 fn parse_output(output: &str) -> ParseStatus {
-    let Some(json) = judge_json(output, SchemaHint::L3) else { return ParseStatus::Inconclusive(UNSTRUCTURED_OUTPUT_DETAIL.to_owned()) };
+    let Some((json, mut repaired)) = judge_json_marked(output, SchemaHint::L3) else { return ParseStatus::Inconclusive(UNSTRUCTURED_OUTPUT_DETAIL.to_owned()) };
     let response = match serde_json::from_str::<ReviewResponse>(&json) {
         Ok(response) => response,
         Err(_) => match repair_partial_json(&json, SchemaHint::L3).map(|repaired| serde_json::from_str::<ReviewResponse>(&repaired)) {
-            Some(Ok(response)) => response,
+            Some(Ok(response)) => { repaired = true; response }
             Some(Err(error)) => return ParseStatus::Inconclusive(format!("invalid JSON: {error}")),
             None => return ParseStatus::Inconclusive(UNSTRUCTURED_OUTPUT_DETAIL.to_owned()),
         },
@@ -136,20 +155,21 @@ fn parse_output(output: &str) -> ParseStatus {
     let mut violated_rules: Vec<String> = response.violated_rules.into_iter().filter(|id| !id.trim().is_empty()).collect();
     violated_rules.sort();
     violated_rules.dedup();
-    ParseStatus::Parsed(Review { verdict: response.verdict, bugs: rank_bugs(bugs, MAX_BUGS), violated_rules })
+    ParseStatus::Parsed(Review { verdict: response.verdict, bugs: rank_bugs(bugs, MAX_BUGS), violated_rules, repaired })
 }
 /// The vote follows the rated findings and the declared severity of violated rules, not the judge's word.
 fn classify_vote(review: &Review, rules: &[&Rule]) -> VoteKind {
     if review.verdict != "pass" && review.verdict != "fail" { return VoteKind::Inconclusive; }
     let rule_impact = rules.iter().filter(|rule| review.violated_rules.contains(&rule.id))
         .map(|rule| match rule.severity { RuleSeverity::Blocking => Impact::High, RuleSeverity::Advisory => Impact::Medium }).max();
-    match max_impact(&review.bugs).max(rule_impact) {
+    let vote = match max_impact(&review.bugs).max(rule_impact) {
         Some(Impact::High) => VoteKind::FailBlocking,
         Some(Impact::Medium) => VoteKind::FailAdvisory,
         Some(Impact::Low) => VoteKind::Pass,
         None if review.verdict == "fail" => VoteKind::Inconclusive,
         None => VoteKind::Pass,
-    }
+    };
+    if review.repaired && vote == VoteKind::Pass { VoteKind::Inconclusive } else { vote }
 }
 fn inconclusive_outcome(model: &str, detail: String, cost_usd: f64) -> CallOutcome {
     CallOutcome { vote: VoteKind::Inconclusive, review: None, evidence: Evidence { layer: Layer::L3CrossLlm, signal: SignalKind::LlmVote, passed: false, detail, cite: Some(model.to_owned()), cost_usd } }

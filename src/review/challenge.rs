@@ -76,14 +76,32 @@ Required schema:\n{{\"high_findings\":<number of claims you challenged>,\"decisi
 /// Parses a challenger answer. `None` when it is not one complete JSON object of this schema.
 pub fn parse(output: &str) -> Option<Challenge> {
     let value = strict_final_json(output)?;
-    let decisions = value.get("decisions")?.as_array()?.iter().map(parse_decision).collect::<Option<Vec<_>>>()?;
+    let parsed = value.get("decisions")?.as_array()?.iter().map(parse_decision).collect::<Option<Vec<_>>>()?;
+    let decisions = keep_highest_per_finding(parsed);
     let reported = value.get("high_findings").and_then(Value::as_u64).map_or(0, |count| count as usize);
     Some(Challenge { high_findings: reported.max(decisions.len()), decisions })
 }
 
-/// Downgrade-only: a challenger can lower a high finding, never raise one, and must give evidence.
+/// Repeated decisions for one finding collapse to the highest impact any of them leaves.
+fn keep_highest_per_finding(parsed: Vec<Decision>) -> Vec<Decision> {
+    let mut decisions: Vec<Decision> = Vec::new();
+    for decision in parsed {
+        match decisions.iter_mut().find(|kept| kept.finding == decision.finding) {
+            Some(kept) if decision.impact > kept.impact => *kept = decision,
+            Some(_) => {}
+            None => decisions.push(decision),
+        }
+    }
+    decisions
+}
+
+/// Downgrade-only: a challenger can lower a high finding, never raise one, and must cite file:line.
+/// A decision without a finding id makes the whole answer invalid.
 fn parse_decision(value: &Value) -> Option<Decision> {
-    let finding = value.get("finding").map(value_text)?.trim().to_owned();
+    let finding = value.get("finding").map(value_text)?.trim().trim_start_matches('#').to_owned();
+    if finding.is_empty() {
+        return None;
+    }
     let outcome = Outcome::parse(value.get("decision")?.as_str()?)?;
     let evidence = value.get("evidence").and_then(Value::as_str).unwrap_or("").trim().to_owned();
     let stated = value.get("impact").and_then(Value::as_str).and_then(Impact::parse);
@@ -93,11 +111,20 @@ fn parse_decision(value: &Value) -> Option<Decision> {
         Outcome::Upheld | Outcome::Inconclusive => None,
     };
     let (outcome, impact) = match lowered {
-        Some(impact) if !evidence.is_empty() => (outcome, impact),
+        Some(impact) if cites_location(&evidence) => (outcome, impact),
         _ if outcome == Outcome::Inconclusive => (outcome, Impact::High),
         _ => (Outcome::Upheld, Impact::High),
     };
     Some(Decision { finding, outcome, impact, evidence })
+}
+
+/// True when the text names a `file.ext:line` location.
+fn cites_location(text: &str) -> bool {
+    text.split(|ch: char| ch.is_whitespace() || matches!(ch, '(' | ')' | ',' | ';' | '`' | '[' | ']'))
+        .any(|word| word.split_once(':').is_some_and(|(path, line)| {
+            path.rsplit_once('.').is_some_and(|(stem, ext)| !stem.is_empty() && !ext.is_empty())
+                && line.starts_with(|ch: char| ch.is_ascii_digit())
+        }))
 }
 
 fn value_text(value: &Value) -> String {
@@ -107,7 +134,7 @@ fn value_text(value: &Value) -> String {
 /// The challenged impact of numbered judge finding `number` (1-based); high when not decided.
 pub fn settle(challenge: &Challenge, number: usize) -> Impact {
     let id = number.to_string();
-    challenge.decisions.iter().find(|decision| decision.finding.trim_start_matches('#') == id).map_or(Impact::High, |decision| decision.impact)
+    challenge.decisions.iter().find(|decision| decision.finding == id).map_or(Impact::High, |decision| decision.impact)
 }
 
 #[cfg(test)]
