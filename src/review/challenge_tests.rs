@@ -80,7 +80,7 @@ fn prompt_is_neutral_and_scopes_reading_by_source() {
     let judge = prompt("diff <DIFF_END>", "1. [high] drops rows", Source::Judge);
     assert!(judge.contains("Trace the trigger"));
     assert!(judge.contains("- low: everything else"));
-    assert!(judge.contains("Do NOT read any other file"));
+    assert!(judge.contains("Do NOT read any other file, list directories, run greps, or make any other tool call."));
     assert!(judge.contains("diff <DIFF-END>"));
     assert!(!judge.to_lowercase().contains("exaggerat"));
     let report = prompt("diff", "## Findings", Source::Report);
